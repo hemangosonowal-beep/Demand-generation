@@ -46,7 +46,13 @@ st.markdown(
     [data-testid="stSidebar"] {
         background: #051C2C;
     }
-    [data-testid="stSidebar"] * {
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] span,
+    [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2,
+    [data-testid="stSidebar"] h3, [data-testid="stSidebar"] h4,
+    [data-testid="stSidebar"] li, [data-testid="stSidebar"] a,
+    [data-testid="stSidebar"] .stMarkdown,
+    [data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
         color: #FFFFFF !important;
     }
     [data-testid="stSidebar"] .stSelectbox label,
@@ -56,6 +62,10 @@ st.markdown(
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.08em;
+    }
+    [data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] span,
+    [data-testid="stSidebar"] .stTextInput input {
+        color: #051C2C !important;
     }
 
     /* Main header */
