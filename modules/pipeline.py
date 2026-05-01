@@ -222,13 +222,15 @@ def run_analysis(
             Products=("Title", "count"),
             Avg_Price=("Offer Price", "mean"),
             Total_Qty=("Qty bought in last 30 days", "sum"),
+            Total_Ratings=("Rating Count", "sum"),
             Avg_Rating=("Rating", "mean"),
         )
-        .sort_values("Total_Qty", ascending=False)
-        .head(20)
-        .reset_index()
         .fillna(0)
+        .reset_index()
     )
+    # Sort: Qty bought desc, then Rating Count desc as tiebreaker
+    amz_brands["_sort"] = amz_brands["Total_Qty"].where(amz_brands["Total_Qty"] > 0, amz_brands["Total_Ratings"])
+    amz_brands = amz_brands.sort_values("_sort", ascending=False).drop(columns=["_sort"]).head(20)
 
     amz_bands = _price_bands(amz_price_valid)
 
@@ -238,7 +240,7 @@ def run_analysis(
     results["amz_bands"] = amz_bands
     results["amz_top_products"] = (
         amz_matched.nlargest(20, "Importance")[
-            ["Brand", "Title", "Offer Price", "Qty bought in last 30 days", "Rating"]
+            ["Brand", "Title", "Offer Price", "Qty bought in last 30 days", "Rating", "Rating Count"]
         ]
         .fillna(0)
         .to_dict("records")
