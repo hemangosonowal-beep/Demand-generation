@@ -24,7 +24,10 @@ def generate_html(results: dict, insights: dict) -> str:
     dashboard_data = _compile_data(results, insights)
 
     # Compress to base64
-    json_str = json.dumps(dashboard_data, default=str)
+    # CRITICAL: allow_nan=False replaces NaN/Infinity with null,
+    # because JS JSON.parse() rejects NaN (invalid per RFC 8259)
+    dashboard_data = _sanitize_nans(dashboard_data)
+    json_str = json.dumps(dashboard_data, default=str, allow_nan=False)
     compressed = gzip.compress(json_str.encode("utf-8"))
     b64 = base64.b64encode(compressed).decode("ascii")
 
@@ -32,6 +35,22 @@ def generate_html(results: dict, insights: dict) -> str:
     gen_date = results.get("generated_date", "")
 
     return _build_html(category, gen_date, b64)
+
+
+def _sanitize_nans(obj):
+    """Recursively replace float NaN/Infinity with None (null in JSON).
+
+    Python json.dumps outputs 'NaN' for float('nan'), which is invalid JSON.
+    JavaScript JSON.parse() throws SyntaxError on NaN, blanking the entire page.
+    """
+    import math
+    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+        return None
+    if isinstance(obj, dict):
+        return {k: _sanitize_nans(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_nans(v) for v in obj]
+    return obj
 
 
 def _compile_data(results: dict, insights: dict) -> dict:
