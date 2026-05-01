@@ -163,12 +163,32 @@ Return ONLY the JSON — no other text.
         insights = json.loads(text)
         return insights
 
-    except json.JSONDecodeError as e:
-        st.warning(f"Gemini returned invalid JSON: {e}. Using fallback insights.")
+    except json.JSONDecodeError:
+        # Try to repair common JSON issues from LLM output
+        try:
+            repaired = _repair_json(text)
+            insights = json.loads(repaired)
+            return insights
+        except (json.JSONDecodeError, Exception):
+            pass
+        st.warning("Gemini returned invalid JSON. Using fallback insights.")
         return _fallback_insights(category, results)
     except Exception as e:
         st.warning(f"Gemini API call failed: {e}. Using fallback insights.")
         return _fallback_insights(category, results)
+
+
+def _repair_json(text: str) -> str:
+    """Attempt to fix common JSON issues from LLM output."""
+    # Remove trailing commas before } or ]
+    text = re.sub(r",\s*([}\]])", r"\1", text)
+    # Fix missing commas between key-value pairs: }"key" → },"key"
+    text = re.sub(r'"\s*\n\s*"', '",\n"', text)
+    # Fix missing commas after values: "value"\n"key" patterns
+    text = re.sub(r'([\d\w"])\s*\n\s*"(\w+)":', r'\1,\n"\2":', text)
+    # Fix missing commas between array elements: }\n{
+    text = re.sub(r"}\s*\n\s*{", "},\n{", text)
+    return text
 
 
 def _build_context(category: str, results: dict) -> str:
