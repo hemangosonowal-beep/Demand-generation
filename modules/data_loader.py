@@ -91,11 +91,10 @@ def load_amazon() -> pd.DataFrame:
     )
     df["Rating Count"] = pd.to_numeric(df["Rating Count"], errors="coerce")
     df["Rating"] = pd.to_numeric(df["Rating"], errors="coerce")
-    # Importance score
-    df["Importance"] = df["Qty bought in last 30 days"].fillna(0)
-    df.loc[df["Importance"] == 0, "Importance"] = df.loc[
-        df["Importance"] == 0, "Rating Count"
-    ].fillna(0)
+    # Importance score: Qty bought first, Rating Count as fallback
+    qty = pd.to_numeric(df["Qty bought in last 30 days"], errors="coerce").fillna(0)
+    rc = pd.to_numeric(df["Rating Count"], errors="coerce").fillna(0)
+    df["Importance"] = qty.where(qty > 0, rc).astype(float)
     return df
 
 
