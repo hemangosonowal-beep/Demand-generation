@@ -124,59 +124,130 @@ Generate exactly 6 insight cards. Make the seasonal calendar India-specific (Diw
 Return ONLY the JSON — no other text.
 """
 
-    try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
-            config={
+    # Try twice: first with JSON mode, then without (in case model doesn't support it)
+    for attempt, use_json_mode in enumerate([True, False]):
+        try:
+            config = {
                 "temperature": 0.3,
-                "max_output_tokens": 4000,
-                "response_mime_type": "application/json",
-            },
-        )
+                "max_output_tokens": 8000,
+            }
+            if use_json_mode:
+                config["response_mime_type"] = "application/json"
 
-        # Handle empty or blocked responses
-        if not response.candidates:
-            st.warning("Gemini returned no candidates. Using fallback insights.")
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=config,
+            )
+
+            # Handle empty or blocked responses
+            if not response.candidates:
+                if attempt == 0:
+                    continue  # retry without JSON mode
+                st.warning("Gemini returned no candidates. Using fallback insights.")
+                return _fallback_insights(category, results)
+
+            text = ""
+            for part in response.candidates[0].content.parts:
+                if hasattr(part, "text") and part.text:
+                    text += part.text
+
+            text = text.strip()
+            if not text:
+                if attempt == 0:
+                    continue
+                st.warning("Gemini returned empty response. Using fallback insights.")
+                return _fallback_insights(category, results)
+
+            # Parse the JSON from the response
+            insights = _extract_json(text)
+            if insights:
+                return insights
+
+            # If first attempt failed, retry without JSON mode
+            if attempt == 0:
+                continue
+
+            st.warning("Gemini returned invalid JSON. Using fallback insights.")
             return _fallback_insights(category, results)
 
-        text = ""
-        for part in response.candidates[0].content.parts:
-            if hasattr(part, "text") and part.text:
-                text += part.text
-
-        text = text.strip()
-        if not text:
-            st.warning("Gemini returned empty response. Using fallback insights.")
+        except Exception as e:
+            if attempt == 0:
+                continue  # retry without JSON mode
+            st.warning(f"Gemini API call failed: {e}. Using fallback insights.")
             return _fallback_insights(category, results)
 
-        # Clean JSON if wrapped in code fences
-        if "```" in text:
-            match = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
-            if match:
-                text = match.group(1).strip()
+    st.warning("Gemini failed after retries. Using fallback insights.")
+    return _fallback_insights(category, results)
 
-        # Try to find JSON object in text
+
+def _extract_json(text: str) -> dict | None:
+    """Extract and parse JSON from LLM response text.
+
+    Handles: code fences, thinking blocks, trailing text, malformed commas.
+    Returns parsed dict or None if all attempts fail.
+    """
+    # Step 1: Remove code fences
+    if "```" in text:
+        match = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
+        if match:
+            text = match.group(1).strip()
+
+    # Step 2: Find the outermost JSON object (skip any preamble/thinking)
+    # Use bracket matching to find the complete JSON object
+    start = text.find("{")
+    if start == -1:
+        return None
+
+    depth = 0
+    in_string = False
+    escape = False
+    end = start
+    for i in range(start, len(text)):
+        c = text[i]
+        if escape:
+            escape = False
+            continue
+        if c == "\\":
+            escape = True
+            continue
+        if c == '"' and not escape:
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                end = i + 1
+                break
+
+    if depth != 0:
+        # Braces didn't balance — try greedy regex as fallback
         json_match = re.search(r"\{[\s\S]*\}", text)
         if json_match:
             text = json_match.group(0)
+        else:
+            return None
+    else:
+        text = text[start:end]
 
-        insights = json.loads(text)
-        return insights
-
+    # Step 3: Try parsing as-is
+    try:
+        return json.loads(text)
     except json.JSONDecodeError:
-        # Try to repair common JSON issues from LLM output
-        try:
-            repaired = _repair_json(text)
-            insights = json.loads(repaired)
-            return insights
-        except (json.JSONDecodeError, Exception):
-            pass
-        st.warning("Gemini returned invalid JSON. Using fallback insights.")
-        return _fallback_insights(category, results)
-    except Exception as e:
-        st.warning(f"Gemini API call failed: {e}. Using fallback insights.")
-        return _fallback_insights(category, results)
+        pass
+
+    # Step 4: Repair and retry
+    try:
+        repaired = _repair_json(text)
+        return json.loads(repaired)
+    except (json.JSONDecodeError, Exception):
+        pass
+
+    return None
 
 
 def _repair_json(text: str) -> str:
