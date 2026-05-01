@@ -36,97 +36,105 @@ def generate_html(results: dict, insights: dict) -> str:
 
 def _compile_data(results: dict, insights: dict) -> dict:
     """Merge pipeline results and AI insights into dashboard data structure."""
-    category = results.get("category", "")
-    ex = insights
-    amz_stats = results.get("amz_stats", {})
-    fk_stats = results.get("fk_stats", {})
+    category = results.get("category", "") or ""
+    ex = insights or {}
+    amz_stats = results.get("amz_stats") or {}
+    fk_stats = results.get("fk_stats") or {}
 
-    # KPI cards
+    # KPI cards — use `or` to handle None values
+    jm_kw = results.get("jm_keywords") or []
+    kp_kw = results.get("kp_keywords") or []
+    cov_pct = results.get("coverage_pct") or 0
+    ws_count = results.get("whitespace_count") or 0
+    amz_count = results.get("amz_count") or 0
+    fk_count = results.get("fk_count") or 0
+    actions = results.get("actions") or []
+
     kpi_cards = [
-        {"label": "JM Keywords", "value": str(len(results.get("jm_keywords", []))),
-         "delta": f"{results.get('coverage_pct', 0)}% coverage"},
-        {"label": "Google Keywords", "value": str(len(results.get("kp_keywords", []))),
-         "delta": f"{results.get('whitespace_count', 0)} whitespace"},
-        {"label": "Amazon Products", "value": str(results.get("amz_count", 0)),
-         "delta": f"Median ₹{int(amz_stats.get('Median', 0))}"},
-        {"label": "Flipkart Products", "value": str(results.get("fk_count", 0)),
-         "delta": f"Median ₹{int(fk_stats.get('Median', 0))}"},
-        {"label": "Coverage", "value": f"{results.get('coverage_pct', 0)}%",
-         "delta": f"{results.get('whitespace_count', 0)} gaps"},
-        {"label": "Actions", "value": str(len(results.get("actions", []))),
+        {"label": "JM Keywords", "value": str(len(jm_kw)),
+         "delta": f"{cov_pct}% coverage"},
+        {"label": "Google Keywords", "value": str(len(kp_kw)),
+         "delta": f"{ws_count} whitespace"},
+        {"label": "Amazon Products", "value": str(amz_count),
+         "delta": f"Median ₹{int(amz_stats.get('Median') or 0)}"},
+        {"label": "Flipkart Products", "value": str(fk_count),
+         "delta": f"Median ₹{int(fk_stats.get('Median') or 0)}"},
+        {"label": "Coverage", "value": f"{cov_pct}%",
+         "delta": f"{ws_count} gaps"},
+        {"label": "Actions", "value": str(len(actions)),
          "delta": "prioritized by GMV"},
     ]
 
-    actions = results.get("actions", [])
-
     # Demand gaps
+    demand_gaps_raw = results.get("demand_gaps") or []
+    coverage_kw_raw = results.get("coverage_keywords") or []
     demand_gaps = {
         "whitespace": [
             {
-                "keyword": k.get("Keyword", ""),
-                "google_vol": k.get("Avg. monthly searches", 0),
-                "competition": k.get("Competition", ""),
-                "yoy_change": k.get("YoY change", ""),
-                "gmv_opportunity": k.get("GMV_opportunity", 0),
+                "keyword": k.get("Keyword", "") or "",
+                "google_vol": k.get("Avg. monthly searches", 0) or 0,
+                "competition": k.get("Competition", "") or "",
+                "yoy_change": k.get("YoY change", "") or "",
+                "gmv_opportunity": k.get("GMV_opportunity", 0) or 0,
             }
-            for k in results.get("demand_gaps", [])[:50]
+            for k in demand_gaps_raw[:50]
         ],
         "coverage": [
             {
-                "keyword": k.get("Keyword", ""),
-                "google_vol": k.get("Avg. monthly searches", 0),
-                "jm_volume": k.get("jm_volume", 0),
-                "jm_growth": k.get("jm_growth", 0),
-                "competition": k.get("Competition", ""),
+                "keyword": k.get("Keyword", "") or "",
+                "google_vol": k.get("Avg. monthly searches", 0) or 0,
+                "jm_volume": k.get("jm_volume", 0) or 0,
+                "jm_growth": k.get("jm_growth", 0) or 0,
+                "competition": k.get("Competition", "") or "",
             }
-            for k in results.get("coverage_keywords", [])[:50]
+            for k in coverage_kw_raw[:50]
         ],
-        "total_whitespace": results.get("whitespace_count", 0),
-        "total_coverage": len(results.get("coverage_keywords", [])),
-        "coverage_pct": results.get("coverage_pct", 0),
+        "total_whitespace": results.get("whitespace_count") or 0,
+        "total_coverage": len(coverage_kw_raw),
+        "coverage_pct": results.get("coverage_pct") or 0,
     }
 
-    market = insights.get("market_research", {})
+    market = insights.get("market_research") or {}
 
     return {
         "category": category,
-        "generated_date": results.get("generated_date", ""),
+        "generated_date": results.get("generated_date") or "",
         "executive": {
-            "situation": insights.get("situation", ""),
-            "complication": insights.get("complication", ""),
-            "resolution": insights.get("resolution", ""),
+            "situation": ex.get("situation") or "",
+            "complication": ex.get("complication") or "",
+            "resolution": ex.get("resolution") or "",
             "kpi_cards": kpi_cards,
             "top_actions": actions[:5],
         },
         "actions": actions,
         "demand_gaps": demand_gaps,
         "brands": {
-            "amazon": results.get("amz_brands", [])[:20],
-            "flipkart": results.get("fk_brands", [])[:20],
-            "only_amazon": results.get("brands_only_amz", []),
-            "only_flipkart": results.get("brands_only_fk", []),
-            "on_both": results.get("brands_both", []),
-            "market_leaders": market.get("top_india_brands", []),
+            "amazon": (results.get("amz_brands") or [])[:20],
+            "flipkart": (results.get("fk_brands") or [])[:20],
+            "only_amazon": results.get("brands_only_amz") or [],
+            "only_flipkart": results.get("brands_only_fk") or [],
+            "on_both": results.get("brands_both") or [],
+            "market_leaders": market.get("top_india_brands") or [],
         },
         "pricing": {
-            "amazon_bands": results.get("amz_bands", {}),
-            "flipkart_bands": results.get("fk_bands", {}),
+            "amazon_bands": results.get("amz_bands") or {},
+            "flipkart_bands": results.get("fk_bands") or {},
             "amazon_stats": amz_stats,
             "flipkart_stats": fk_stats,
-            "market_segments": market.get("price_segments", {}),
-            "sweet_spot": insights.get("sweet_spot", ""),
-            "amz_top_products": results.get("amz_top_products", [])[:20],
-            "fk_top_products": results.get("fk_top_products", [])[:20],
+            "market_segments": market.get("price_segments") or {},
+            "sweet_spot": insights.get("sweet_spot") or "",
+            "amz_top_products": (results.get("amz_top_products") or [])[:20],
+            "fk_top_products": (results.get("fk_top_products") or [])[:20],
         },
-        "forecast": results.get("forecast", {}),
-        "seasonal": insights.get("seasonal", {}),
+        "forecast": results.get("forecast") or {},
+        "seasonal": insights.get("seasonal") or {},
         "market": market,
-        "insight_cards": insights.get("insight_cards", []),
+        "insight_cards": insights.get("insight_cards") or [],
         "tables": {
-            "jm_keywords": results.get("jm_keywords", []),
-            "kp_keywords": results.get("kp_keywords", [])[:200],
-            "amz_products": results.get("amz_top_products", []),
-            "fk_products": results.get("fk_top_products", [])[:50],
+            "jm_keywords": results.get("jm_keywords") or [],
+            "kp_keywords": (results.get("kp_keywords") or [])[:200],
+            "amz_products": results.get("amz_top_products") or [],
+            "fk_products": (results.get("fk_top_products") or [])[:50],
         },
     }
 
@@ -345,7 +353,8 @@ gHTML+=`</tbody></table></div></div>`;
 
 // TAB 3: Brand & Sourcing
 const br=D.brands||{};
-const aS=D.pricing?.amazon_stats||{};const fS=D.pricing?.flipkart_stats||{};
+const pr0=D.pricing||{};
+const aS=pr0.amazon_stats||{};const fS=pr0.flipkart_stats||{};
 const aM=Math.round(aS.Median||0);const fM=Math.round(fS.Median||0);
 const pD=aM>0?Math.round((aM-fM)/aM*100):0;
 let bHTML=`<div class="tab" id="tab-brands"><div class="headline">${(br.only_amazon||[]).length} brands on Amazon missing from FK. Amazon median ₹${fmtNum(aM)} is ${pD}% above Flipkart ₹${fmtNum(fM)}.</div>`;
@@ -360,7 +369,7 @@ if((br.market_leaders||[]).length){bHTML+=`<div class="section-title">Industry L
 bHTML+=`</div>`;
 
 // TAB 4: Price Positioning
-const pr=D.pricing||{};const aBands=pr.amazon_bands||{};const fBands=pr.flipkart_bands||{};
+const pr=D.pricing||{};const aBands=pr.amazon_bands||{};const fBands=pr.flipkart_bands||{};const aS2=pr.amazon_stats||{};const fS2=pr.flipkart_stats||{};
 const bLabels=Object.keys(aBands);
 let prHTML=`<div class="tab" id="tab-pricing"><div class="headline">Amazon median ₹${fmtNum(aM)} vs Flipkart ₹${fmtNum(fM)} (${pD}% delta). Target the ₹${fmtNum(Math.round(aS.Q1||0))}–₹${fmtNum(Math.round(aS.Q3||0))} range.</div>`;
 prHTML+=`<div class="metric-grid cols-4"><div class="metric-card"><div class="label">AMZ Median</div><div class="value">₹${fmtNum(aM)}</div><div class="delta">Q1-Q3: ₹${fmtNum(Math.round(aS.Q1||0))}-₹${fmtNum(Math.round(aS.Q3||0))}</div></div><div class="metric-card"><div class="label">FK Median</div><div class="value">₹${fmtNum(fM)}</div><div class="delta">Q1-Q3: ₹${fmtNum(Math.round(fS.Q1||0))}-₹${fmtNum(Math.round(fS.Q3||0))}</div></div><div class="metric-card"><div class="label">AMZ Mean</div><div class="value">₹${fmtNum(Math.round(aS.Mean||0))}</div><div class="delta">Indicates premium tail</div></div><div class="metric-card"><div class="label">FK Mean</div><div class="value">₹${fmtNum(Math.round(fS.Mean||0))}</div><div class="delta">Lower positioning</div></div></div>`;
@@ -412,7 +421,7 @@ setTimeout(()=>{
 },100);
 setTimeout(()=>{
   const c2=document.getElementById('chart-pb');
-  if(c2){const lb=Object.keys(D.pricing.amazon_bands);new Chart(c2,{type:'bar',data:{labels:lb,datasets:[{label:'Amazon',data:lb.map(l=>D.pricing.amazon_bands[l]||0),backgroundColor:'rgba(255,153,0,0.8)',borderRadius:4},{label:'Flipkart',data:lb.map(l=>D.pricing.flipkart_bands[l]||0),backgroundColor:'rgba(40,116,240,0.8)',borderRadius:4}]},options:{responsive:true,indexAxis:'y',plugins:{title:{display:true,text:'Price Band: Amazon vs Flipkart',font:{size:16,weight:'700'},color:'#051C2C'}},scales:{x:{beginAtZero:true}}}})}
+  if(c2){const aBd=D.pricing&&D.pricing.amazon_bands||{};const fBd=D.pricing&&D.pricing.flipkart_bands||{};const lb=Object.keys(aBd);if(lb.length){new Chart(c2,{type:'bar',data:{labels:lb,datasets:[{label:'Amazon',data:lb.map(l=>aBd[l]||0),backgroundColor:'rgba(255,153,0,0.8)',borderRadius:4},{label:'Flipkart',data:lb.map(l=>fBd[l]||0),backgroundColor:'rgba(40,116,240,0.8)',borderRadius:4}]},options:{responsive:true,indexAxis:'y',plugins:{title:{display:true,text:'Price Band: Amazon vs Flipkart',font:{size:16,weight:'700'},color:'#051C2C'}},scales:{x:{beginAtZero:true}}}})}}
 },200);
 
 function togAcc(id){const b=document.getElementById(id);const i=document.getElementById('i-'+id);b.classList.toggle('open');i.textContent=b.classList.contains('open')?'▾':'▸'}
