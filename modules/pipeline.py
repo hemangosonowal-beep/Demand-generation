@@ -329,25 +329,42 @@ def run_analysis(
 # Helpers
 # ─────────────────────────────────────────────────────────────────────
 def _match_amazon(amazon: pd.DataFrame, cat_keywords: list) -> pd.DataFrame:
-    cat_lower = [c.lower() for c in cat_keywords]
-    cat_words = set()
-    for c in cat_lower:
-        cat_words.update(c.split())
+    """Match Amazon products against category keywords.
+
+    Priority: IC columns (structured category) > title (free text).
+    For title matching, require the category phrase to appear as a
+    contiguous substring to avoid false positives like
+    "bike riding face cover" matching "bike covers".
+    """
+    cat_lower = [c.lower().strip() for c in cat_keywords if len(str(c).strip()) >= 3]
+    if not cat_lower:
+        return pd.DataFrame(columns=amazon.columns)
+
+    # Pre-build AOP/IC column values for vectorized filtering
+    ic_cols_available = [c for c in ["IC L1", "IC L2", "IC L3", "IC L4", "AOP L1", "AOP L2"] if c in amazon.columns]
 
     matched_idx = set()
     for idx, row in amazon.iterrows():
-        title = str(row.get("Title", "")).lower()
-        ic_cols = " ".join(
-            str(row.get(c, "")).lower() for c in ["IC L1", "IC L2", "IC L3", "IC L4"] if c in row.index
-        )
-        combined = title + " " + ic_cols
-
+        # Strategy 1: Exact match in IC/AOP columns (most reliable)
+        ic_values = [str(row.get(c, "")).lower().strip() for c in ic_cols_available]
+        ic_matched = False
         for cat in cat_lower:
-            cat_w = set(cat.split())
-            if cat_w.issubset(set(combined.split())):
-                matched_idx.add(idx)
+            for ic_val in ic_values:
+                if ic_val and (cat == ic_val or cat in ic_val):
+                    matched_idx.add(idx)
+                    ic_matched = True
+                    break
+            if ic_matched:
                 break
-            if fuzz.token_set_ratio(cat, combined) >= 85:
+        if ic_matched:
+            continue
+
+        # Strategy 2: Category phrase appears as contiguous substring in title
+        title = str(row.get("Title", "")).lower()
+        for cat in cat_lower:
+            # Check singular/plural: "bike covers" matches "bike cover" and vice versa
+            cat_base = cat.rstrip("s")
+            if cat in title or cat_base in title or (cat + "s") in title:
                 matched_idx.add(idx)
                 break
 
