@@ -131,6 +131,7 @@ Return ONLY the JSON — no other text.
             config={
                 "temperature": 0.3,
                 "max_output_tokens": 4000,
+                "response_mime_type": "application/json",
             },
         )
 
