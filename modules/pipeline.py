@@ -153,9 +153,15 @@ def run_analysis(
         cagr_pct = None
         if len(vols) >= 2 and vols[0] > 0:
             growth_pct = ((vols[-1] - vols[0]) / vols[0]) * 100
+            # Cap growth_pct to ±500% to avoid tiny-base inflation
+            growth_pct = max(-500, min(500, growth_pct))
             n_periods = len(vols) - 1
             if n_periods > 0 and vols[0] > 0 and vols[-1] > 0:
-                cagr_pct = ((vols[-1] / vols[0]) ** (12 / max(n_periods, 1)) - 1) * 100
+                # Only compute CAGR if base volume >= 10 (avoids 1→200 = 19900% noise)
+                if vols[0] >= 10:
+                    cagr_pct = ((vols[-1] / vols[0]) ** (12 / max(n_periods, 1)) - 1) * 100
+                    # Cap CAGR to ±500% — anything beyond is statistical noise
+                    cagr_pct = max(-500, min(500, cagr_pct))
         jm_growth.append(
             {
                 "Keyword": kw,
@@ -385,11 +391,15 @@ def _build_forecast(jm_keywords: list, avg_price: float) -> dict:
     """Simple quarterly forecast from JM keyword growth."""
     fc_keywords = []
     for k in jm_keywords:
-        vol = k.get("total_vol", 0)
+        vol = k.get("total_vol", 0) or 0
         cagr = k.get("cagr_pct", 0) or 0
         growth = k.get("growth_pct", 0) or 0
+        # Cap values to avoid display overflow from tiny-base keywords
+        cagr = max(-500, min(500, cagr))
+        growth = max(-500, min(500, growth))
         yoy_ratio = 1 + (growth / 100) if growth else 1.0
         forecast_vol = vol * (1 + cagr / 100 / 4) if cagr else vol
+        forecast_vol = max(0, min(forecast_vol, vol * 10))  # cap at 10x current
         priority_score = (vol * 0.5 + forecast_vol * 0.3 + abs(cagr) * 10) / 100
         fc_keywords.append(
             {
