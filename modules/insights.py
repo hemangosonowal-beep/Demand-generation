@@ -133,13 +133,32 @@ Return ONLY the JSON — no other text.
                 "max_output_tokens": 4000,
             },
         )
-        text = response.text.strip()
+
+        # Handle empty or blocked responses
+        if not response.candidates:
+            st.warning("Gemini returned no candidates. Using fallback insights.")
+            return _fallback_insights(category, results)
+
+        text = ""
+        for part in response.candidates[0].content.parts:
+            if hasattr(part, "text") and part.text:
+                text += part.text
+
+        text = text.strip()
+        if not text:
+            st.warning("Gemini returned empty response. Using fallback insights.")
+            return _fallback_insights(category, results)
 
         # Clean JSON if wrapped in code fences
         if "```" in text:
             match = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
             if match:
                 text = match.group(1).strip()
+
+        # Try to find JSON object in text
+        json_match = re.search(r"\{[\s\S]*\}", text)
+        if json_match:
+            text = json_match.group(0)
 
         insights = json.loads(text)
         return insights
