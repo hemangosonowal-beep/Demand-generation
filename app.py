@@ -137,16 +137,22 @@ st.markdown(
 # Check data readiness
 # ─────────────────────────────────────────────────────────────────────
 data_status = check_data_ready()
-all_ready = all(s["ready"] for s in data_status.values())
+# Only hierarchy is strictly required; other sources degrade gracefully
+hierarchy_ready = data_status.get("hierarchy", {}).get("ready", False)
+any_search_ready = data_status.get("jm_search", {}).get("ready", False) or data_status.get("keyword_planner", {}).get("ready", False)
 
-if not all_ready:
-    st.error("⚠️ Data files not found. Run `python prepare_data.py` first to convert raw data to parquet format.")
-    st.markdown("**Missing files:**")
-    for name, status in data_status.items():
-        icon = "✅" if status["ready"] else "❌"
-        st.markdown(f"- {icon} `{name}` — {'Ready' if status['ready'] else 'Missing'}")
-    st.info("See README.md for setup instructions.")
+if not hierarchy_ready:
+    st.error("⚠️ Hierarchy file not found. Run `python prepare_data.py` first.")
     st.stop()
+
+if not any_search_ready:
+    st.error("⚠️ No search data found (JM Search or Keyword Planner). At least one is needed.")
+    st.stop()
+
+# Show warnings for missing optional sources
+missing_optional = [name for name, s in data_status.items() if not s["ready"] and name not in ("hierarchy",)]
+if missing_optional:
+    st.warning(f"⚠️ Optional data sources not available: {', '.join(missing_optional)}. Related sections will show 'Data not available'.")
 
 
 # ─────────────────────────────────────────────────────────────────────

@@ -152,6 +152,12 @@ def _compile_data(results: dict, insights: dict) -> dict:
         "google_trends": results.get("google_trends") or {},
         "jm_seasonality": results.get("jm_seasonality") or {},
         "youtube_suggestions": results.get("youtube_suggestions") or {},
+        "data_availability": {
+            "jm_search": results.get("jm_data_available") is not False,
+            "keyword_planner": results.get("kp_data_available") is not False,
+            "amazon": results.get("amz_data_available") is not False,
+            "flipkart": results.get("fk_data_available") is not False,
+        },
     }
 
 
@@ -425,33 +431,48 @@ gHTML+=`<div class="section-title" style="margin-top:32px">Covered Keywords</div
 gHTML+=`</tbody></table></div></div>`;
 
 // TAB 3: Brand & Sourcing
-const br=D.brands||{};
+const br=D.brands||{};const avail=D.data_availability||{};
 const pr0=D.pricing||{};
 const aS=pr0.amazon_stats||{};const fS=pr0.flipkart_stats||{};
 const aM=Math.round(aS.Median||0);const fM=Math.round(fS.Median||0);
 const pD=aM>0?Math.round((aM-fM)/aM*100):0;
-let bHTML=`<div class="tab" id="tab-brands"><div class="headline">${(br.only_amazon||[]).length} brands on Amazon missing from FK. Amazon median ₹${fmtNum(aM)} is ${pD}% above Flipkart ₹${fmtNum(fM)}.</div>`;
-bHTML+=`<div class="metric-grid cols-3"><div class="metric-card" style="border-left:4px solid var(--amz)"><div class="label">Amazon</div><div class="value" style="color:var(--amz)">₹${fmtNum(aM)}</div><div class="delta">Median · ${D.executive.kpi_cards[2].value} products</div></div><div class="metric-card" style="border-left:4px solid var(--fk)"><div class="label">Flipkart</div><div class="value" style="color:var(--fk)">₹${fmtNum(fM)}</div><div class="delta">Median · ${D.executive.kpi_cards[3].value} products</div></div><div class="metric-card" style="border-left:4px solid var(--coral)"><div class="label">Price Delta</div><div class="value">${pD}%</div><div class="delta">Amazon premium</div></div></div>`;
-bHTML+=`<div class="section-title">Top Amazon Brands</div><div style="overflow-x:auto"><table class="m-card-view"><thead><tr><th>#</th><th>Brand</th><th>Products</th><th>Avg Price</th><th>Units/30d</th><th>Rating</th></tr></thead><tbody>`;
+const noAmz=!avail.amazon;const noFk=!avail.flipkart;
+let bHTML=`<div class="tab" id="tab-brands">`;
+if(noAmz&&noFk){bHTML+=`<div class="headline" style="border-left-color:var(--coral)">Amazon and Flipkart data not available. Upload the data files and re-run prepare_data.py to enable competitive analysis.</div>`}
+else{bHTML+=`<div class="headline">${noAmz?'Amazon data not available. ':noFk?'Flipkart data not available. ':''}${!noAmz&&!noFk?(br.only_amazon||[]).length+' brands on Amazon missing from FK. Amazon median ₹'+fmtNum(aM)+' is '+pD+'% above Flipkart ₹'+fmtNum(fM)+'.':''}</div>`}
+if(!noAmz||!noFk){bHTML+=`<div class="metric-grid cols-3">`;
+if(!noAmz){bHTML+=`<div class="metric-card" style="border-left:4px solid var(--amz)"><div class="label">Amazon</div><div class="value" style="color:var(--amz)">₹${fmtNum(aM)}</div><div class="delta">Median · ${D.executive.kpi_cards[2].value} products</div></div>`}
+if(!noFk){bHTML+=`<div class="metric-card" style="border-left:4px solid var(--fk)"><div class="label">Flipkart</div><div class="value" style="color:var(--fk)">₹${fmtNum(fM)}</div><div class="delta">Median · ${D.executive.kpi_cards[3].value} products</div></div>`}
+if(!noAmz&&!noFk){bHTML+=`<div class="metric-card" style="border-left:4px solid var(--coral)"><div class="label">Price Delta</div><div class="value">${pD}%</div><div class="delta">Amazon premium</div></div>`}
+bHTML+=`</div>`}
+if(!noAmz){bHTML+=`<div class="section-title">Top Amazon Brands</div><div style="overflow-x:auto"><table class="m-card-view"><thead><tr><th>#</th><th>Brand</th><th>Products</th><th>Avg Price</th><th>Units/30d</th><th>Rating</th></tr></thead><tbody>`;
 (br.amazon||[]).forEach((b,i)=>{bHTML+=`<tr><td data-label="#">${i+1}</td><td data-label="Brand" style="font-weight:600;color:var(--navy)">${b.Brand}</td><td data-label="Products">${b.Products||'—'}</td><td data-label="Avg Price">₹${fmtNum(Math.round(b.Avg_Price||0))}</td><td data-label="Units/30d">${fmtNum(Math.round(b.Total_Qty||0))}</td><td data-label="Rating">${(b.Avg_Rating||0).toFixed(1)}</td></tr>`});
-bHTML+=`</tbody></table></div>`;
-bHTML+=`<div class="section-title">Top Flipkart Brands</div><div style="overflow-x:auto"><table class="m-card-view"><thead><tr><th>#</th><th>Brand</th><th>Products</th><th>Avg Price</th><th>Ratings</th><th>Rating</th></tr></thead><tbody>`;
+bHTML+=`</tbody></table></div>`} else {bHTML+=`<div class="section-title">Amazon Brands</div><div style="background:var(--highlight);padding:20px;border-radius:8px;color:var(--steel);font-size:13px;margin-bottom:16px">Amazon data not available. Upload Amazon Top Sellers file to enable.</div>`}
+if(!noFk){bHTML+=`<div class="section-title">Top Flipkart Brands</div><div style="overflow-x:auto"><table class="m-card-view"><thead><tr><th>#</th><th>Brand</th><th>Products</th><th>Avg Price</th><th>Ratings</th><th>Rating</th></tr></thead><tbody>`;
 (br.flipkart||[]).forEach((b,i)=>{bHTML+=`<tr><td data-label="#">${i+1}</td><td data-label="Brand" style="font-weight:600;color:var(--navy)">${b.Brand}</td><td data-label="Products">${b.Products||'—'}</td><td data-label="Avg Price">₹${fmtNum(Math.round(b.Avg_Price||0))}</td><td data-label="Ratings">${fmtNum(Math.round(b.Total_Ratings||0))}</td><td data-label="Rating">${(b.Avg_Rating||0).toFixed(1)}</td></tr>`});
-bHTML+=`</tbody></table></div>`;
+bHTML+=`</tbody></table></div>`} else {bHTML+=`<div class="section-title">Flipkart Brands</div><div style="background:var(--highlight);padding:20px;border-radius:8px;color:var(--steel);font-size:13px;margin-bottom:16px">Flipkart data not available. Upload Flipkart Best Sellers files to enable.</div>`}
 if((br.market_leaders||[]).length){bHTML+=`<div class="section-title">Industry Leaders</div><div class="brand-cards">`;(br.market_leaders||[]).forEach(b=>{bHTML+=`<div class="brand-card"><div class="brand-name">${b}</div><div class="brand-meta">Verify JM listing</div></div>`});bHTML+=`</div>`}
 bHTML+=`</div>`;
 
 // TAB 4: Price Positioning
 const pr=D.pricing||{};const aBands=pr.amazon_bands||{};const fBands=pr.flipkart_bands||{};const aS2=pr.amazon_stats||{};const fS2=pr.flipkart_stats||{};
 const bLabels=Object.keys(aBands);
-let prHTML=`<div class="tab" id="tab-pricing"><div class="headline">Amazon median ₹${fmtNum(aM)} vs Flipkart ₹${fmtNum(fM)} (${pD}% delta). Target the ₹${fmtNum(Math.round(aS.Q1||0))}–₹${fmtNum(Math.round(aS.Q3||0))} range.</div>`;
-prHTML+=`<div class="metric-grid cols-4"><div class="metric-card"><div class="label">AMZ Median</div><div class="value">₹${fmtNum(aM)}</div><div class="delta">Q1-Q3: ₹${fmtNum(Math.round(aS.Q1||0))}-₹${fmtNum(Math.round(aS.Q3||0))}</div></div><div class="metric-card"><div class="label">FK Median</div><div class="value">₹${fmtNum(fM)}</div><div class="delta">Q1-Q3: ₹${fmtNum(Math.round(fS.Q1||0))}-₹${fmtNum(Math.round(fS.Q3||0))}</div></div><div class="metric-card"><div class="label">AMZ Mean</div><div class="value">₹${fmtNum(Math.round(aS.Mean||0))}</div><div class="delta">Indicates premium tail</div></div><div class="metric-card"><div class="label">FK Mean</div><div class="value">₹${fmtNum(Math.round(fS.Mean||0))}</div><div class="delta">Lower positioning</div></div></div>`;
-prHTML+=`<div class="chart-container"><canvas id="chart-pb" height="280"></canvas></div>`;
-prHTML+=`<div class="two-col"><div><div class="section-title">Top Amazon Products</div><table class="m-card-view"><thead><tr><th>Product</th><th>Price</th><th>Units</th><th>Ratings</th><th>Rating</th></tr></thead><tbody>`;
+let prHTML=`<div class="tab" id="tab-pricing">`;
+if(noAmz&&noFk){prHTML+=`<div class="headline" style="border-left-color:var(--coral)">Price positioning data not available. Upload Amazon and/or Flipkart data files to enable this analysis.</div></div>`;} else {
+prHTML+=`<div class="headline">${noAmz?'Amazon data not available. Showing Flipkart only.':noFk?'Flipkart data not available. Showing Amazon only.':'Amazon median ₹'+fmtNum(aM)+' vs Flipkart ₹'+fmtNum(fM)+' ('+pD+'% delta). Target the ₹'+fmtNum(Math.round(aS.Q1||0))+'–₹'+fmtNum(Math.round(aS.Q3||0))+' range.'}</div>`;
+prHTML+=`<div class="metric-grid cols-4">`;
+if(!noAmz){prHTML+=`<div class="metric-card"><div class="label">AMZ Median</div><div class="value">₹${fmtNum(aM)}</div><div class="delta">Q1-Q3: ₹${fmtNum(Math.round(aS.Q1||0))}-₹${fmtNum(Math.round(aS.Q3||0))}</div></div><div class="metric-card"><div class="label">AMZ Mean</div><div class="value">₹${fmtNum(Math.round(aS.Mean||0))}</div><div class="delta">Indicates premium tail</div></div>`}
+if(!noFk){prHTML+=`<div class="metric-card"><div class="label">FK Median</div><div class="value">₹${fmtNum(fM)}</div><div class="delta">Q1-Q3: ₹${fmtNum(Math.round(fS.Q1||0))}-₹${fmtNum(Math.round(fS.Q3||0))}</div></div><div class="metric-card"><div class="label">FK Mean</div><div class="value">₹${fmtNum(Math.round(fS.Mean||0))}</div><div class="delta">Lower positioning</div></div>`}
+prHTML+=`</div>`;
+if(bLabels.length||Object.keys(fBands).length){prHTML+=`<div class="chart-container"><canvas id="chart-pb" height="280"></canvas></div>`}
+prHTML+=`<div class="two-col">`;
+if(!noAmz){prHTML+=`<div><div class="section-title">Top Amazon Products</div><table class="m-card-view"><thead><tr><th>Product</th><th>Price</th><th>Units</th><th>Ratings</th><th>Rating</th></tr></thead><tbody>`;
 (pr.amz_top_products||[]).slice(0,15).forEach(p=>{prHTML+=`<tr><td data-label="Product" style="font-size:12px">${(p.Title||p['Product Name']||'').substring(0,60)}</td><td data-label="Price">₹${fmtNum(Math.round(p['Offer Price']||0))}</td><td data-label="Units">${fmtNum(p['Qty bought in last 30 days']||0)}</td><td data-label="Ratings">${fmtNum(Math.round(p['Rating Count']||0))}</td><td data-label="Rating">${(p.Rating||0).toFixed(1)}</td></tr>`});
-prHTML+=`</tbody></table></div><div><div class="section-title">Top Flipkart Products</div><table class="m-card-view"><thead><tr><th>Product</th><th>Price</th><th>Ratings</th><th>Rating</th></tr></thead><tbody>`;
+prHTML+=`</tbody></table></div>`} else {prHTML+=`<div><div class="section-title">Amazon Products</div><div style="background:var(--highlight);padding:20px;border-radius:8px;color:var(--steel);font-size:13px">Data not available</div></div>`}
+if(!noFk){prHTML+=`<div><div class="section-title">Top Flipkart Products</div><table class="m-card-view"><thead><tr><th>Product</th><th>Price</th><th>Ratings</th><th>Rating</th></tr></thead><tbody>`;
 (pr.fk_top_products||[]).slice(0,15).forEach(p=>{prHTML+=`<tr><td data-label="Product" style="font-size:12px">${(p['Product Name']||'').substring(0,60)}</td><td data-label="Price">₹${fmtNum(Math.round(p['Selling Price']||0))}</td><td data-label="Ratings">${fmtNum(Math.round(p['Rating Count']||0))}</td><td data-label="Rating">${(Number(p.Rating)||0).toFixed(1)}</td></tr>`});
-prHTML+=`</tbody></table></div></div></div>`;
+prHTML+=`</tbody></table></div>`} else {prHTML+=`<div><div class="section-title">Flipkart Products</div><div style="background:var(--highlight);padding:20px;border-radius:8px;color:var(--steel);font-size:13px">Data not available</div></div>`}
+prHTML+=`</div></div>`}
 
 // TAB 5: Trends & Forecast
 const fc=D.forecast||{};const fcKw=fc.keywords||[];
