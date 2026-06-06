@@ -149,12 +149,9 @@ def _compile_data(results: dict, insights: dict) -> dict:
         "seasonal": insights.get("seasonal") or {},
         "market": market,
         "insight_cards": insights.get("insight_cards") or [],
-        "tables": {
-            "jm_keywords": results.get("jm_keywords") or [],
-            "kp_keywords": (results.get("kp_keywords") or [])[:200],
-            "amz_products": results.get("amz_top_products") or [],
-            "fk_products": (results.get("fk_top_products") or [])[:50],
-        },
+        "google_trends": results.get("google_trends") or {},
+        "jm_seasonality": results.get("jm_seasonality") or {},
+        "youtube_suggestions": results.get("youtube_suggestions") or {},
     }
 
 
@@ -337,8 +334,7 @@ Chart.defaults.plugins.tooltip.padding = 12;
 const TABS = [
   {id:'exec',label:'Executive Brief'},{id:'actions',label:'Action Queue'},
   {id:'gaps',label:'Demand Gaps'},{id:'brands',label:'Brand & Sourcing'},
-  {id:'pricing',label:'Price Positioning'},{id:'forecast',label:'Forecast & Planning'},
-  {id:'market',label:'Market Context'},{id:'tables',label:'Data Tables'}
+  {id:'pricing',label:'Price Positioning'},{id:'forecast',label:'Trends & Forecast'}
 ];
 
 const nav = document.getElementById('nav');
@@ -381,7 +377,12 @@ execHTML += `<div class="scr-label" style="margin-bottom:12px;color:var(--teal)"
 execHTML += `<div style="font-size:13px;color:var(--steel);margin:8px 0 0 56px">→ ${(D.actions||[]).length} total actions in Action Queue</div>`;
 execHTML += `<div class="metrics-bar">`;
 (ex.kpi_cards||[]).forEach(k=>{execHTML+=`<div class="mb-item"><div class="mb-value">${k.value}</div><div class="mb-label">${k.label}</div><div style="font-size:10px;color:var(--steel)">${k.delta}</div></div>`});
-execHTML += `</div></div>`;
+execHTML += `</div>`;
+// Market context + Insight cards (merged from old Market Context tab)
+const mkt=D.market||{};const cards=D.insight_cards||[];
+if(mkt.market_size||mkt.cagr){execHTML+=`<div class="section-title" style="margin-top:32px">Market Context</div><div class="metric-grid cols-3"><div class="metric-card"><div class="label">Market Size</div><div class="value" style="font-size:24px">${mkt.market_size||'—'}</div></div><div class="metric-card"><div class="label">CAGR</div><div class="value">${mkt.cagr||'—'}</div></div><div class="metric-card"><div class="label">Key Segments</div><div style="font-size:13px;margin-top:8px;color:var(--navy)">${mkt.key_segments||'—'}</div></div></div>`}
+if(cards.length){execHTML+=`<div class="section-title">Strategic Insights</div><div class="two-col">`;cards.forEach(c=>{const cls=c.impact==='High'?'impact-high':'impact-medium';execHTML+=`<div class="insight-card ${cls}"><div style="margin-bottom:8px">${pillHTML(c.impact,c.impact)} <span style="font-size:11px;color:var(--steel);margin-left:8px">${c.category}</span></div><div style="font-size:13px;color:var(--steel);margin-bottom:8px">${c.finding}</div><div class="so-what-box">So What? ${c.sowhat}</div></div>`});execHTML+=`</div>`}
+execHTML += `</div>`;
 
 // TAB 1: Action Queue
 const actions=D.actions||[];
@@ -452,39 +453,60 @@ prHTML+=`</tbody></table></div><div><div class="section-title">Top Flipkart Prod
 (pr.fk_top_products||[]).slice(0,15).forEach(p=>{prHTML+=`<tr><td data-label="Product" style="font-size:12px">${(p['Product Name']||'').substring(0,60)}</td><td data-label="Price">₹${fmtNum(Math.round(p['Selling Price']||0))}</td><td data-label="Ratings">${fmtNum(Math.round(p['Rating Count']||0))}</td><td data-label="Rating">${(Number(p.Rating)||0).toFixed(1)}</td></tr>`});
 prHTML+=`</tbody></table></div></div></div>`;
 
-// TAB 5: Forecast & Planning
+// TAB 5: Trends & Forecast
 const fc=D.forecast||{};const fcKw=fc.keywords||[];
-let fcHTML=`<div class="tab" id="tab-forecast"><div class="headline">${fcKw.length} keywords tracked. ${fcKw.filter(k=>k.cagr_pct>15).length} show >15% CAGR — prioritize these.</div>`;
+const gt=D.google_trends||{};const jmSeas=D.jm_seasonality||{};const ytSug=D.youtube_suggestions||{};
+let fcHTML=`<div class="tab" id="tab-forecast"><div class="headline">${fcKw.length} keywords tracked. ${fcKw.filter(k=>k.cagr_pct>15).length} show >15% CAGR. ${(gt.interest_over_time||[]).length>0?'Google Trends: 12-month data loaded.':''}  ${(jmSeas.monthly_totals||[]).length} months of JM seasonality.</div>`;
+
+// Google Trends section
+if((gt.interest_over_time||[]).length>0){
+fcHTML+=`<div class="section-title">Google Trends — 12 Month Interest (India)</div>`;
+fcHTML+=`<div class="chart-container"><canvas id="chart-gtrends" height="280"></canvas></div>`;
+// Breakout & rising queries
+const bq=gt.breakout_queries||[];const rq=gt.related_queries||[];
+if(bq.length||rq.length){fcHTML+=`<div class="two-col">`;
+if(bq.length){fcHTML+=`<div><div class="section-title">Rising Queries</div><table><thead><tr><th>Query</th><th>Growth</th></tr></thead><tbody>`;bq.forEach(q=>{fcHTML+=`<tr><td style="font-weight:500;color:var(--navy)">${q.query||''}</td><td style="font-weight:600;color:var(--teal)">${q.value||'—'}</td></tr>`});fcHTML+=`</tbody></table></div>`}
+if(rq.length){fcHTML+=`<div><div class="section-title">Top Related Queries</div><table><thead><tr><th>Query</th><th>Score</th></tr></thead><tbody>`;rq.forEach(q=>{fcHTML+=`<tr><td style="font-weight:500;color:var(--navy)">${q.query||''}</td><td>${q.value||'—'}</td></tr>`});fcHTML+=`</tbody></table></div>`}
+fcHTML+=`</div>`}
+// Regional interest
+const reg=gt.regional||[];
+if(reg.length){fcHTML+=`<div class="section-title">Regional Interest (India)</div><div class="chart-container"><canvas id="chart-gregion" height="220"></canvas></div>`}
+} else if(gt.error){fcHTML+=`<div style="background:var(--highlight);padding:16px;border-radius:8px;margin-bottom:24px;font-size:13px;color:var(--steel)">Google Trends: ${gt.error}</div>`}
+
+// JM Search Seasonality — actual data
+const mTotals=jmSeas.monthly_totals||[];
+if(mTotals.length>0){
+fcHTML+=`<div class="section-title">JM Search Seasonality — Actual Monthly Volume</div>`;
+fcHTML+=`<div class="chart-container"><canvas id="chart-jmseas" height="280"></canvas></div>`;
+// Seasonal index grid
+const sIdx=jmSeas.seasonal_index||{};const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const curM=new Date().toLocaleString('en',{month:'short'});
+fcHTML+=`<div class="seasonal-grid">`;
+months.forEach(m=>{const s=sIdx[m]||{};const dc=s.demand==='Very High'?'var(--coral)':s.demand==='High'?'var(--amber)':s.demand==='Low'?'var(--fk)':'var(--steel)';fcHTML+=`<div class="month-card${m===curM?' style="border-left:4px solid var(--navy)"':''}"><div class="month-name">${m}</div><div class="month-demand" style="color:${dc};font-weight:600">${s.demand||'—'}</div><div style="font-size:12px;color:var(--steel)">Index: ${s.index||'—'} · Vol: ${fmtNum(s.volume||0)}</div></div>`});
+fcHTML+=`</div>`;
+// Peak/Trough
+const pk=jmSeas.peak_month||{};const tr=jmSeas.trough_month||{};
+fcHTML+=`<div class="metric-grid cols-3" style="margin-top:16px"><div class="metric-card" style="border-left:4px solid var(--coral)"><div class="label">Peak Month</div><div class="value" style="font-size:20px">${pk.month||'—'}</div><div class="delta">${fmtNum(pk.volume||0)} searches</div></div><div class="metric-card" style="border-left:4px solid var(--fk)"><div class="label">Trough Month</div><div class="value" style="font-size:20px">${tr.month||'—'}</div><div class="delta">${fmtNum(tr.volume||0)} searches</div></div><div class="metric-card"><div class="label">Seasonality Ratio</div><div class="value" style="font-size:20px">${pk.volume&&tr.volume&&tr.volume>0?(pk.volume/tr.volume).toFixed(1)+'x':'—'}</div><div class="delta">Peak / Trough</div></div></div>`;
+}
+
+// YouTube Social Signals
+const ytClusters=ytSug.clusters||[];
+if(ytClusters.length>0){
+fcHTML+=`<div class="section-title">Social Listening — YouTube Search Signals</div>`;
+fcHTML+=`<div style="font-size:13px;color:var(--steel);margin-bottom:16px">${ytSug.total_signals||0} unique demand signals scraped from YouTube autocomplete</div>`;
+ytClusters.forEach(c=>{
+fcHTML+=`<div style="margin-bottom:16px"><div style="font-weight:600;color:var(--navy);margin-bottom:8px">"${c.query_term}" — ${c.count} signals</div><div style="display:flex;flex-wrap:wrap;gap:8px">`;
+(c.suggestions||[]).forEach(s=>{fcHTML+=`<span class="pill" style="background:var(--highlight);color:var(--navy);padding:6px 14px;font-size:12px">${s}</span>`});
+fcHTML+=`</div></div>`});
+}
+
+// Forecast table
+fcHTML+=`<div class="section-title">Keyword Forecast</div>`;
 fcHTML+=`<div style="overflow-x:auto"><table class="m-card-view"><thead><tr><th>#</th><th>Keyword</th><th>Current Vol</th><th>Forecast</th><th>YoY</th><th>CAGR %</th><th>Priority</th></tr></thead><tbody>`;
 fcKw.slice(0,25).forEach((k,i)=>{const s=k.cagr_pct>15?'border-left:3px solid var(--teal)':'';fcHTML+=`<tr style="${s}"><td data-label="#">${i+1}</td><td data-label="Keyword" style="font-weight:500;color:var(--navy)">${k.keyword}</td><td data-label="Current Vol" style="text-align:right">${fmtNum(Math.round(k.current_vol||0))}</td><td data-label="Forecast" style="text-align:right">${fmtNum(Math.round(k.forecast_vol||0))}</td><td data-label="YoY" style="text-align:right">${(k.yoy_ratio||0).toFixed(2)}x</td><td data-label="CAGR %" style="text-align:right">${(k.cagr_pct||0).toFixed(1)}%</td><td data-label="Priority" style="text-align:right;font-weight:700">${(k.priority_score||0).toFixed(1)}</td></tr>`});
-fcHTML+=`</tbody></table></div>`;
-const seasonal=D.seasonal||{};const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-fcHTML+=`<div class="section-title">Seasonal Calendar</div><div class="seasonal-grid">`;
-const curM=new Date().toLocaleString('en',{month:'short'});
-months.forEach(m=>{const s=seasonal[m]||{};const dc=s.demand==='Very High'?'var(--coral)':s.demand==='High'?'var(--amber)':'var(--steel)';fcHTML+=`<div class="month-card${m===curM?' style="border-left:4px solid var(--navy)"':''}"><div class="month-name">${m}</div><div class="month-demand" style="color:${dc};font-weight:600">${s.demand||'Medium'}</div><div class="month-note">${s.note||''}</div></div>`});
-fcHTML+=`</div></div>`;
+fcHTML+=`</tbody></table></div></div>`;
 
-// TAB 6: Market Context
-const mkt=D.market||{};const cards=D.insight_cards||[];
-let mHTML=`<div class="tab" id="tab-market"><div class="headline">${D.category} — ${mkt.market_size||'Enable API for data'}. CAGR: ${mkt.cagr||'—'}.</div>`;
-mHTML+=`<div class="metric-grid cols-3"><div class="metric-card"><div class="label">Market Size</div><div class="value" style="font-size:24px">${mkt.market_size||'—'}</div></div><div class="metric-card"><div class="label">CAGR</div><div class="value">${mkt.cagr||'—'}</div></div><div class="metric-card"><div class="label">Key Segments</div><div style="font-size:13px;margin-top:8px;color:var(--navy)">${mkt.key_segments||'—'}</div></div></div>`;
-if(cards.length){mHTML+=`<div class="section-title">Strategic Insights</div><div class="two-col">`;cards.forEach(c=>{const cls=c.impact==='High'?'impact-high':'impact-medium';mHTML+=`<div class="insight-card ${cls}"><div style="margin-bottom:8px">${pillHTML(c.impact,c.impact)} <span style="font-size:11px;color:var(--steel);margin-left:8px">${c.category}</span></div><div style="font-size:13px;color:var(--steel);margin-bottom:8px">${c.finding}</div><div class="so-what-box">So What? ${c.sowhat}</div></div>`});mHTML+=`</div>`}
-const segs=mkt.price_segments||{};
-if(Object.keys(segs).length){mHTML+=`<div class="section-title">Price Segments</div><div class="metric-grid cols-4">`;Object.entries(segs).forEach(([k,v])=>{mHTML+=`<div class="metric-card"><div class="label">${k}</div><div style="font-size:13px;margin-top:8px;color:var(--navy)">${v}</div></div>`});mHTML+=`</div>`}
-if((mkt.top_india_brands||[]).length){mHTML+=`<div class="section-title">Key Brands</div><div class="brand-cards">`;mkt.top_india_brands.forEach(b=>{mHTML+=`<div class="brand-card"><div class="brand-name">${b}</div></div>`});mHTML+=`</div>`}
-mHTML+=`</div>`;
-
-// TAB 7: Data Tables
-const tbl=D.tables||{};
-let tHTML=`<div class="tab" id="tab-tables"><div class="headline">Reference data for deeper analysis.</div>`;
-function mkAcc(title,id,hdr,rows,fn){let h=`<div class="accordion-header" onclick="togAcc('${id}')">${title} (${rows.length}) <span id="i-${id}">▸</span></div><div class="accordion-body" id="${id}"><input class="search-input" placeholder="Search..." oninput="searchT('t-${id}',this.value)"><div style="overflow-x:auto;max-height:500px"><table id="t-${id}"><thead><tr>${hdr.map(h=>'<th>'+h+'</th>').join('')}</tr></thead><tbody>`;rows.forEach(r=>{h+=fn(r)});h+=`</tbody></table></div></div>`;return h}
-tHTML+=mkAcc('JM Keywords','jm',['Keyword','Total Vol','Months','Growth %','CAGR %'],tbl.jm_keywords||[],r=>`<tr><td>${r.Keyword||''}</td><td style="text-align:right">${fmtNum(r.total_vol||0)}</td><td>${r.months_present||'—'}</td><td>${r.growth_pct?r.growth_pct.toFixed(0)+'%':'—'}</td><td>${r.cagr_pct?r.cagr_pct.toFixed(1)+'%':'—'}</td></tr>`);
-tHTML+=mkAcc('Google KP','kp',['Keyword','Avg Monthly','Competition','3m Change','YoY'],(tbl.kp_keywords||[]).slice(0,100),r=>`<tr><td>${r.Keyword||''}</td><td style="text-align:right">${fmtNum(r['Avg. monthly searches']||0)}</td><td>${r.Competition||'—'}</td><td>${r['Three month change']||'—'}</td><td>${r['YoY change']||'—'}</td></tr>`);
-tHTML+=mkAcc('Amazon Products','amz',['Title','Price','Units','Rating'],tbl.amz_products||[],r=>`<tr><td style="font-size:12px">${(r.Title||'').substring(0,80)}</td><td>₹${fmtNum(Math.round(r['Offer Price']||0))}</td><td>${fmtNum(r['Qty bought in last 30 days']||0)}</td><td>${(r.Rating||0).toFixed(1)}</td></tr>`);
-tHTML+=mkAcc('Flipkart Products','fk',['Product','Price','Ratings','Rating'],tbl.fk_products||[],r=>`<tr><td style="font-size:12px">${(r['Product Name']||'').substring(0,80)}</td><td>₹${fmtNum(Math.round(r['Selling Price']||0))}</td><td>${fmtNum(Math.round(r['Rating Count']||0))}</td><td>${(Number(r.Rating)||0).toFixed(1)}</td></tr>`);
-tHTML+=`</div>`;
-
-content.innerHTML = execHTML+actHTML+gHTML+bHTML+prHTML+fcHTML+mHTML+tHTML;
+content.innerHTML = execHTML+actHTML+gHTML+bHTML+prHTML+fcHTML;
 
 // Charts
 setTimeout(()=>{
@@ -507,6 +529,48 @@ setTimeout(()=>{
     }
   }
 },300);
+
+// Google Trends line chart
+setTimeout(()=>{
+  const c4=document.getElementById('chart-gtrends');
+  if(c4){
+    const iot=D.google_trends&&D.google_trends.interest_over_time||[];
+    const terms=D.google_trends&&D.google_trends.trend_terms||[];
+    if(iot.length&&terms.length){
+      const colors=['#051C2C','#E05A47','#00A6A0','#D4920B','#2874F0'];
+      const datasets=terms.map((t,i)=>({label:t,data:iot.map(d=>d[t]||0),borderColor:colors[i%5],backgroundColor:colors[i%5]+'20',tension:0.3,fill:i===0,pointRadius:2,borderWidth:2}));
+      new Chart(c4,{type:'line',data:{labels:iot.map(d=>{const dt=new Date(d.date);return dt.toLocaleDateString('en-IN',{month:'short',year:'2-digit'})}),datasets},options:{responsive:true,interaction:{intersect:false,mode:'index'},plugins:{title:{display:true,text:'Google Trends — Interest Over Time (India)',font:{size:16,weight:'700'},color:'#051C2C'},legend:{position:'bottom'}},scales:{y:{beginAtZero:true,max:100,title:{display:true,text:'Interest (0-100)'}}}}})}
+  }
+},400);
+
+// JM Seasonality chart
+setTimeout(()=>{
+  const c5=document.getElementById('chart-jmseas');
+  if(c5){
+    const mT=D.jm_seasonality&&D.jm_seasonality.monthly_totals||[];
+    if(mT.length){
+      const kwCurves=D.jm_seasonality.keyword_curves||[];
+      const datasets=[{label:'Total Volume',data:mT.map(m=>m.volume),borderColor:'#051C2C',backgroundColor:'rgba(5,28,44,0.1)',tension:0.3,fill:true,borderWidth:2.5,pointRadius:4,yAxisID:'y'}];
+      const kColors=['#E05A47','#00A6A0','#D4920B','#2874F0','#FF9900'];
+      kwCurves.forEach((kc,i)=>{
+        const kData=mT.map(m=>{const match=kc.data.find(d=>d.month===m.month);return match?match.volume:0});
+        datasets.push({label:kc.keyword,data:kData,borderColor:kColors[i%5],tension:0.3,borderWidth:1.5,pointRadius:2,borderDash:[4,4],yAxisID:'y2'})
+      });
+      new Chart(c5,{type:'line',data:{labels:mT.map(m=>m.month),datasets},options:{responsive:true,interaction:{intersect:false,mode:'index'},plugins:{title:{display:true,text:'JM Search Volume — Monthly Trend',font:{size:16,weight:'700'},color:'#051C2C'},legend:{position:'bottom'}},scales:{y:{beginAtZero:true,title:{display:true,text:'Total Volume'},position:'left'},y2:{beginAtZero:true,display:false,position:'right',grid:{drawOnChartArea:false}}}}})
+    }
+  }
+},500);
+
+// Google Trends regional chart
+setTimeout(()=>{
+  const c6=document.getElementById('chart-gregion');
+  if(c6){
+    const reg=D.google_trends&&D.google_trends.regional||[];
+    if(reg.length){
+      new Chart(c6,{type:'bar',data:{labels:reg.map(r=>r.region),datasets:[{label:'Interest',data:reg.map(r=>r.interest),backgroundColor:'rgba(5,28,44,0.8)',borderRadius:4}]},options:{indexAxis:'y',responsive:true,plugins:{title:{display:true,text:'Regional Interest — Top States',font:{size:16,weight:'700'},color:'#051C2C'},legend:{display:false}},scales:{x:{beginAtZero:true,max:100}}}})
+    }
+  }
+},600);
 
 function togAcc(id){const b=document.getElementById(id);const i=document.getElementById('i-'+id);b.classList.toggle('open');i.textContent=b.classList.contains('open')?'▾':'▸'}
 function searchT(tid,q){const t=document.getElementById(tid);if(!t)return;t.querySelectorAll('tbody tr').forEach(r=>{r.style.display=r.textContent.toLowerCase().includes(q.toLowerCase())?'':'none'})}

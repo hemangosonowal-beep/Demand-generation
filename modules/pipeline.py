@@ -9,6 +9,9 @@ import numpy as np
 from thefuzz import fuzz
 from datetime import datetime
 import re
+import json
+import urllib.request
+import urllib.parse
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -100,6 +103,230 @@ def fuzzy_match_keywords(category_keywords: list, data_keywords) -> set:
                 break
 
     return matched
+
+
+# ─────────────────────────────────────────────────────────────────────
+# STEP 2b: Google Trends via pytrends
+# ─────────────────────────────────────────────────────────────────────
+def fetch_google_trends(category: str, top_keywords: list) -> dict:
+    """Fetch Google Trends data for category and top keywords.
+
+    Returns dict with interest_over_time, breakout_queries, regional data.
+    Gracefully returns empty dict on failure (pytrends can be flaky).
+    """
+    try:
+        from pytrends.request import TrendReq
+    except ImportError:
+        return {"error": "pytrends not installed"}
+
+    result = {
+        "interest_over_time": [],
+        "breakout_queries": [],
+        "related_queries": [],
+        "regional": [],
+    }
+
+    try:
+        pytrends = TrendReq(hl="en-IN", tz=330, timeout=(10, 25))
+
+        # Use category + top 4 keywords (max 5 terms for pytrends)
+        terms = [category] + [k for k in top_keywords[:4] if k.lower() != category.lower()]
+        terms = terms[:5]
+
+        pytrends.build_payload(terms, cat=0, timeframe="today 12-m", geo="IN")
+
+        # Interest over time
+        iot = pytrends.interest_over_time()
+        if not iot.empty and "isPartial" in iot.columns:
+            iot = iot.drop(columns=["isPartial"])
+        if not iot.empty:
+            iot_data = []
+            for date_idx, row in iot.iterrows():
+                entry = {"date": date_idx.strftime("%Y-%m-%d")}
+                for col in iot.columns:
+                    entry[col] = int(row[col])
+                iot_data.append(entry)
+            result["interest_over_time"] = iot_data
+            result["trend_terms"] = list(iot.columns)
+
+        # Related queries for the main category term
+        try:
+            related = pytrends.related_queries()
+            if category in related and related[category]:
+                top_q = related[category].get("top")
+                rising_q = related[category].get("rising")
+                if top_q is not None and not top_q.empty:
+                    result["related_queries"] = top_q.head(10).to_dict("records")
+                if rising_q is not None and not rising_q.empty:
+                    result["breakout_queries"] = rising_q.head(10).to_dict("records")
+        except Exception:
+            pass
+
+        # Regional interest
+        try:
+            region = pytrends.interest_by_region(resolution="REGION", inc_low_vol=True)
+            if not region.empty and category in region.columns:
+                reg_data = region[category].sort_values(ascending=False).head(10)
+                result["regional"] = [
+                    {"region": idx, "interest": int(val)}
+                    for idx, val in reg_data.items()
+                    if val > 0
+                ]
+        except Exception:
+            pass
+
+    except Exception as e:
+        result["error"] = str(e)[:200]
+
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────
+# STEP 2c: JM Search Seasonality from monthly data
+# ─────────────────────────────────────────────────────────────────────
+def compute_jm_seasonality(jm_filtered: pd.DataFrame) -> dict:
+    """Compute month-over-month seasonality from actual JM Search data.
+
+    jm_filtered: DataFrame with columns [Keyword, Search Volume, Month]
+    Returns dict with monthly_totals (list) and keyword_curves (top 5 keywords).
+    """
+    if jm_filtered.empty or "Month" not in jm_filtered.columns:
+        return {"monthly_totals": [], "keyword_curves": []}
+
+    # Aggregate total volume per month
+    monthly = (
+        jm_filtered.groupby("Month")["Search Volume"]
+        .sum()
+        .sort_index()
+        .reset_index()
+    )
+    monthly["Month_Label"] = monthly["Month"].dt.strftime("%b %Y")
+
+    monthly_totals = [
+        {
+            "month": row["Month_Label"],
+            "date": row["Month"].strftime("%Y-%m-%d"),
+            "volume": int(row["Search Volume"]),
+        }
+        for _, row in monthly.iterrows()
+    ]
+
+    # Compute month-name averages for seasonal pattern
+    jm_filtered = jm_filtered.copy()
+    jm_filtered["MonthName"] = jm_filtered["Month"].dt.strftime("%b")
+    month_avg = (
+        jm_filtered.groupby("MonthName")["Search Volume"]
+        .sum()
+        .reindex(["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"])
+    )
+    overall_avg = month_avg.mean() if len(month_avg) > 0 else 1
+    seasonal_index = {}
+    for m in month_avg.index:
+        v = month_avg.get(m, 0) or 0
+        idx = round(v / overall_avg, 2) if overall_avg > 0 else 1.0
+        demand = "Very High" if idx >= 1.5 else "High" if idx >= 1.2 else "Low" if idx <= 0.7 else "Medium"
+        seasonal_index[m] = {"index": idx, "volume": int(v), "demand": demand}
+
+    # Top 5 keywords by volume — their monthly curves
+    top_kw = (
+        jm_filtered.groupby("Keyword")["Search Volume"]
+        .sum()
+        .nlargest(5)
+        .index.tolist()
+    )
+    keyword_curves = []
+    for kw in top_kw:
+        kw_data = (
+            jm_filtered[jm_filtered["Keyword"] == kw]
+            .groupby("Month")["Search Volume"]
+            .sum()
+            .sort_index()
+        )
+        curve = [
+            {"month": dt.strftime("%b %Y"), "volume": int(vol)}
+            for dt, vol in kw_data.items()
+        ]
+        keyword_curves.append({"keyword": kw, "data": curve})
+
+    # Peak and trough months
+    if monthly_totals:
+        peak = max(monthly_totals, key=lambda x: x["volume"])
+        trough = min(monthly_totals, key=lambda x: x["volume"])
+    else:
+        peak = trough = {"month": "—", "volume": 0}
+
+    return {
+        "monthly_totals": monthly_totals,
+        "seasonal_index": seasonal_index,
+        "keyword_curves": keyword_curves,
+        "peak_month": peak,
+        "trough_month": trough,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────
+# STEP 2d: YouTube Search Suggestions (social listening)
+# ─────────────────────────────────────────────────────────────────────
+def fetch_youtube_suggestions(category: str, keywords: list) -> dict:
+    """Scrape YouTube autocomplete API for demand signals.
+
+    Queries like "[category] best in India 2026", "[keyword] review", etc.
+    Returns list of suggestion clusters.
+    """
+    result = {"clusters": [], "all_suggestions": []}
+
+    suffixes = [
+        "",
+        " best",
+        " best in india",
+        " review",
+        " vs",
+        " under 500",
+        " under 1000",
+    ]
+
+    seen = set()
+    clusters = []
+
+    # Query category + top 3 keywords
+    query_terms = [category] + [k for k in keywords[:3] if k.lower() != category.lower()]
+
+    for term in query_terms:
+        term_suggestions = []
+        for suffix in suffixes:
+            query = f"{term}{suffix}"
+            try:
+                encoded = urllib.parse.quote(query)
+                url = f"https://suggestqueries.google.com/complete/search?client=youtube&ds=yt&q={encoded}"
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    raw = resp.read().decode("latin-1")
+                    # Response is JSONP: window.google.ac.h([...])
+                    # Extract the JSON array
+                    start = raw.index("[")
+                    data = json.loads(raw[start:])
+                    suggestions = [s[0] for s in data[1] if isinstance(s, list) and len(s) > 0]
+                    for s in suggestions:
+                        s_clean = s.strip().lower()
+                        if s_clean not in seen and len(s_clean) > 3:
+                            seen.add(s_clean)
+                            term_suggestions.append(s_clean)
+            except Exception:
+                continue
+
+        if term_suggestions:
+            clusters.append({
+                "query_term": term,
+                "suggestions": term_suggestions[:15],
+                "count": len(term_suggestions[:15]),
+            })
+
+    result["clusters"] = clusters
+    result["all_suggestions"] = list(seen)[:50]
+    result["total_signals"] = len(seen)
+
+    return result
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -291,13 +518,29 @@ def run_analysis(
         .to_dict("records")
     )
 
+    # ── JM Seasonality (from actual monthly data) ──
+    update("Computing JM Search seasonality...", 0.60)
+    seasonality = compute_jm_seasonality(jm_filtered)
+    results["jm_seasonality"] = seasonality
+
+    # ── Google Trends ──
+    update("Fetching Google Trends...", 0.65)
+    top_kw_names = [k["Keyword"] for k in jm_growth[:10]]
+    google_trends = fetch_google_trends(category, top_kw_names)
+    results["google_trends"] = google_trends
+
+    # ── YouTube Suggestions (social listening) ──
+    update("Scraping YouTube search suggestions...", 0.70)
+    yt_suggestions = fetch_youtube_suggestions(category, top_kw_names[:5])
+    results["youtube_suggestions"] = yt_suggestions
+
     # ── Forecast ──
-    update("Building forecast...", 0.65)
+    update("Building forecast...", 0.75)
     forecast = _build_forecast(jm_growth, amz_stats.get("Median", 1000))
     results["forecast"] = forecast
 
     # ── Enrichment layers ──
-    update("Building action queue & enrichment layers...", 0.75)
+    update("Building action queue & enrichment layers...", 0.80)
     avg_price = amz_stats.get("Median", 1000)
     conv_rate = 0.02
 
