@@ -357,85 +357,93 @@ def run_analysis(
     update("Matching JM Search keywords...", 0.10)
     jm_growth = []
     jm_filtered = pd.DataFrame()
-    if not jm_search.empty and "Keyword" in jm_search.columns:
-        jm_all_keywords = jm_search["Keyword"].unique()
-        jm_matched = fuzzy_match_keywords(category_keywords, jm_all_keywords)
+    try:
+        if not jm_search.empty and "Keyword" in jm_search.columns:
+            jm_all_keywords = jm_search["Keyword"].unique()
+            jm_matched = fuzzy_match_keywords(category_keywords, jm_all_keywords)
 
-        jm_filtered = jm_search[jm_search["Keyword"].isin(jm_matched)]
-        jm_grouped = (
-            jm_filtered.groupby("Keyword")
-            .agg(
-                total_vol=("Search Volume", "sum"),
-                months_present=("Month", "nunique"),
-                avg_monthly=("Search Volume", "mean"),
-            )
-            .reset_index()
-        )
+            jm_filtered = jm_search[jm_search["Keyword"].isin(jm_matched)]
+            if not jm_filtered.empty:
+                jm_grouped = (
+                    jm_filtered.groupby("Keyword")
+                    .agg(
+                        total_vol=("Search Volume", "sum"),
+                        months_present=("Month", "nunique"),
+                        avg_monthly=("Search Volume", "mean"),
+                    )
+                    .reset_index()
+                )
 
-        # Growth metrics
-        months_sorted = sorted(jm_filtered["Month"].unique())
-        for _, row in jm_grouped.iterrows():
-            kw = row["Keyword"]
-            kw_data = jm_filtered[jm_filtered["Keyword"] == kw].sort_values("Month")
-            vols = kw_data["Search Volume"].values
-            growth_pct = None
-            cagr_pct = None
-            if len(vols) >= 2 and vols[0] > 0:
-                growth_pct = ((vols[-1] - vols[0]) / vols[0]) * 100
-                growth_pct = max(-500, min(500, growth_pct))
-                n_periods = len(vols) - 1
-                if n_periods > 0 and vols[0] > 0 and vols[-1] > 0:
-                    if vols[0] >= 10:
-                        cagr_pct = ((vols[-1] / vols[0]) ** (12 / max(n_periods, 1)) - 1) * 100
-                        cagr_pct = max(-500, min(500, cagr_pct))
-            jm_growth.append(
-                {
-                    "Keyword": kw,
-                    "total_vol": float(row["total_vol"]),
-                    "months_present": int(row["months_present"]),
-                    "avg_monthly": float(row["avg_monthly"]),
-                    "growth_pct": round(growth_pct, 1) if growth_pct is not None else None,
-                    "cagr_pct": round(cagr_pct, 1) if cagr_pct is not None else None,
-                }
-            )
-        jm_growth.sort(key=lambda x: x["total_vol"], reverse=True)
-    else:
+                for _, row in jm_grouped.iterrows():
+                    kw = row["Keyword"]
+                    kw_data = jm_filtered[jm_filtered["Keyword"] == kw].sort_values("Month")
+                    vols = kw_data["Search Volume"].values
+                    growth_pct = None
+                    cagr_pct = None
+                    if len(vols) >= 2 and vols[0] > 0:
+                        growth_pct = ((vols[-1] - vols[0]) / vols[0]) * 100
+                        growth_pct = max(-500, min(500, growth_pct))
+                        n_periods = len(vols) - 1
+                        if n_periods > 0 and vols[0] > 0 and vols[-1] > 0:
+                            if vols[0] >= 10:
+                                cagr_pct = ((vols[-1] / vols[0]) ** (12 / max(n_periods, 1)) - 1) * 100
+                                cagr_pct = max(-500, min(500, cagr_pct))
+                    jm_growth.append(
+                        {
+                            "Keyword": kw,
+                            "total_vol": float(row["total_vol"]),
+                            "months_present": int(row["months_present"]),
+                            "avg_monthly": float(row["avg_monthly"]),
+                            "growth_pct": round(growth_pct, 1) if growth_pct is not None else None,
+                            "cagr_pct": round(cagr_pct, 1) if cagr_pct is not None else None,
+                        }
+                    )
+                jm_growth.sort(key=lambda x: x["total_vol"], reverse=True)
+        else:
+            results["jm_data_available"] = False
+    except Exception:
         results["jm_data_available"] = False
     results["jm_keywords"] = jm_growth
 
     # ── Keyword Planner matching ──
     update("Matching Google Keyword Planner...", 0.25)
     kp_filtered = pd.DataFrame()
-    if not keyword_planner.empty and "Keyword" in keyword_planner.columns:
-        kp_all_keywords = keyword_planner["Keyword"].unique()
-        kp_matched = fuzzy_match_keywords(category_keywords, kp_all_keywords)
+    try:
+        if not keyword_planner.empty and "Keyword" in keyword_planner.columns:
+            kp_all_keywords = keyword_planner["Keyword"].unique()
+            kp_matched = fuzzy_match_keywords(category_keywords, kp_all_keywords)
 
-        kp_filtered = keyword_planner[keyword_planner["Keyword"].isin(kp_matched)].copy()
-        kp_filtered["Avg. monthly searches"] = pd.to_numeric(
-            kp_filtered["Avg. monthly searches"], errors="coerce"
-        ).fillna(0)
-        kp_filtered = kp_filtered.sort_values("Avg. monthly searches", ascending=False)
-        results["kp_keywords"] = kp_filtered.head(200).to_dict("records")
-    else:
+            kp_filtered = keyword_planner[keyword_planner["Keyword"].isin(kp_matched)].copy()
+            kp_filtered["Avg. monthly searches"] = pd.to_numeric(
+                kp_filtered["Avg. monthly searches"], errors="coerce"
+            ).fillna(0)
+            kp_filtered = kp_filtered.sort_values("Avg. monthly searches", ascending=False)
+            results["kp_keywords"] = kp_filtered.head(200).to_dict("records")
+        else:
+            results["kp_keywords"] = []
+            results["kp_data_available"] = False
+    except Exception:
         results["kp_keywords"] = []
         results["kp_data_available"] = False
 
     # ── Coverage & Whitespace ──
     jm_kw_set = {k["Keyword"].lower() for k in jm_growth}
-    if not kp_filtered.empty:
-        kp_kw_set = set(kp_filtered["Keyword"].str.lower())
-        whitespace = kp_filtered[~kp_filtered["Keyword"].str.lower().isin(jm_kw_set)]
-        coverage = kp_filtered[kp_filtered["Keyword"].str.lower().isin(jm_kw_set)]
-        coverage_pct = round(len(coverage) / max(len(kp_filtered), 1) * 100, 1)
-        whitespace_pct = round(len(whitespace) / max(len(kp_filtered), 1) * 100, 1)
-    else:
+    try:
+        if not kp_filtered.empty:
+            whitespace = kp_filtered[~kp_filtered["Keyword"].str.lower().isin(jm_kw_set)]
+            coverage = kp_filtered[kp_filtered["Keyword"].str.lower().isin(jm_kw_set)]
+            coverage_pct = round(len(coverage) / max(len(kp_filtered), 1) * 100, 1)
+        else:
+            whitespace = pd.DataFrame()
+            coverage = pd.DataFrame()
+            coverage_pct = 0
+    except Exception:
         whitespace = pd.DataFrame()
         coverage = pd.DataFrame()
         coverage_pct = 0
-        whitespace_pct = 0
 
     results["coverage_pct"] = coverage_pct
-    results["whitespace_pct"] = whitespace_pct
+    results["whitespace_pct"] = round(100 - coverage_pct, 1)
     results["whitespace_count"] = len(whitespace)
     results["whitespace_keywords"] = whitespace.head(100).to_dict("records") if not whitespace.empty else []
     results["coverage_keywords"] = coverage.head(50).to_dict("records") if not coverage.empty else []
@@ -443,47 +451,62 @@ def run_analysis(
     # ── Amazon matching ──
     update("Matching Amazon products...", 0.40)
     amz_stats = {"Median": 0, "Q1": 0, "Q3": 0, "Mean": 0}
-    if not amazon.empty and "Title" in amazon.columns:
-        amz_matched = _match_amazon(amazon, category_keywords)
-        amz_matched = amz_matched.sort_values("Importance", ascending=False)
+    try:
+        if not amazon.empty and "Title" in amazon.columns:
+            amz_matched = _match_amazon(amazon, category_keywords)
 
-        amz_price_valid = amz_matched["Offer Price"].dropna()
-        amz_stats = {
-            "Median": round(float(amz_price_valid.median()), 0) if len(amz_price_valid) > 0 else 0,
-            "Q1": round(float(amz_price_valid.quantile(0.25)), 0) if len(amz_price_valid) > 0 else 0,
-            "Q3": round(float(amz_price_valid.quantile(0.75)), 0) if len(amz_price_valid) > 0 else 0,
-            "Mean": round(float(amz_price_valid.mean()), 0) if len(amz_price_valid) > 0 else 0,
-        }
+            if amz_matched.empty:
+                raise ValueError("No Amazon products matched")
 
-        amz_brands = (
-            amz_matched.groupby("Brand")
-            .agg(
-                Products=("Title", "count"),
-                Avg_Price=("Offer Price", "mean"),
-                Total_Qty=("Qty bought in last 30 days", "sum"),
-                Total_Ratings=("Rating Count", "sum"),
-                Avg_Rating=("Rating", "mean"),
+            # Ensure Importance column is numeric
+            if "Importance" not in amz_matched.columns:
+                qty = pd.to_numeric(amz_matched.get("Qty bought in last 30 days", 0), errors="coerce").fillna(0)
+                rc = pd.to_numeric(amz_matched.get("Rating Count", 0), errors="coerce").fillna(0)
+                amz_matched["Importance"] = qty.where(qty > 0, rc)
+            else:
+                amz_matched["Importance"] = pd.to_numeric(amz_matched["Importance"], errors="coerce").fillna(0)
+
+            amz_matched = amz_matched.sort_values("Importance", ascending=False)
+
+            amz_price_valid = pd.to_numeric(amz_matched["Offer Price"], errors="coerce").dropna()
+            amz_stats = {
+                "Median": round(float(amz_price_valid.median()), 0) if len(amz_price_valid) > 0 else 0,
+                "Q1": round(float(amz_price_valid.quantile(0.25)), 0) if len(amz_price_valid) > 0 else 0,
+                "Q3": round(float(amz_price_valid.quantile(0.75)), 0) if len(amz_price_valid) > 0 else 0,
+                "Mean": round(float(amz_price_valid.mean()), 0) if len(amz_price_valid) > 0 else 0,
+            }
+
+            amz_brands = (
+                amz_matched.groupby("Brand")
+                .agg(
+                    Products=("Title", "count"),
+                    Avg_Price=("Offer Price", "mean"),
+                    Total_Qty=("Qty bought in last 30 days", "sum"),
+                    Total_Ratings=("Rating Count", "sum"),
+                    Avg_Rating=("Rating", "mean"),
+                )
+                .fillna(0)
+                .reset_index()
             )
-            .fillna(0)
-            .reset_index()
-        )
-        amz_brands["_sort"] = amz_brands["Total_Qty"].where(amz_brands["Total_Qty"] > 0, amz_brands["Total_Ratings"])
-        amz_brands = amz_brands.sort_values("_sort", ascending=False).drop(columns=["_sort"]).head(20)
+            amz_brands["_sort"] = amz_brands["Total_Qty"].where(amz_brands["Total_Qty"] > 0, amz_brands["Total_Ratings"])
+            amz_brands = amz_brands.sort_values("_sort", ascending=False).drop(columns=["_sort"]).head(20)
 
-        amz_bands = _price_bands(amz_price_valid)
+            amz_bands = _price_bands(amz_price_valid)
 
-        results["amz_count"] = len(amz_matched)
-        results["amz_stats"] = amz_stats
-        results["amz_brands"] = amz_brands.to_dict("records")
-        results["amz_bands"] = amz_bands
-        results["amz_top_products"] = (
-            amz_matched.nlargest(20, "Importance")[
-                ["Brand", "Title", "Offer Price", "Qty bought in last 30 days", "Rating", "Rating Count"]
-            ]
-            .fillna(0)
-            .to_dict("records")
-        )
-    else:
+            # Safe column selection
+            amz_prod_cols = [c for c in ["Brand", "Title", "Offer Price", "Qty bought in last 30 days", "Rating", "Rating Count"] if c in amz_matched.columns]
+            results["amz_count"] = len(amz_matched)
+            results["amz_stats"] = amz_stats
+            results["amz_brands"] = amz_brands.to_dict("records")
+            results["amz_bands"] = amz_bands
+            results["amz_top_products"] = (
+                amz_matched.head(20)[amz_prod_cols]
+                .fillna(0)
+                .to_dict("records")
+            )
+        else:
+            raise ValueError("Amazon data empty or missing columns")
+    except Exception:
         results["amz_count"] = 0
         results["amz_stats"] = amz_stats
         results["amz_brands"] = []
@@ -495,50 +518,63 @@ def run_analysis(
     update("Matching Flipkart products...", 0.55)
     fk_stats = {"Median": 0, "Q1": 0, "Q3": 0, "Mean": 0}
     fk_brands = pd.DataFrame()
-    if not flipkart.empty and "Product Name" in flipkart.columns:
-        fk_matched = _match_flipkart(flipkart, category_keywords)
-        fk_matched = fk_matched.sort_values("Importance", ascending=False)
+    try:
+        if not flipkart.empty and "Product Name" in flipkart.columns:
+            fk_matched = _match_flipkart(flipkart, category_keywords)
 
-        fk_price_valid = fk_matched["Selling Price"].dropna()
-        fk_stats = {
-            "Median": round(float(fk_price_valid.median()), 0) if len(fk_price_valid) > 0 else 0,
-            "Q1": round(float(fk_price_valid.quantile(0.25)), 0) if len(fk_price_valid) > 0 else 0,
-            "Q3": round(float(fk_price_valid.quantile(0.75)), 0) if len(fk_price_valid) > 0 else 0,
-            "Mean": round(float(fk_price_valid.mean()), 0) if len(fk_price_valid) > 0 else 0,
-        }
+            if fk_matched.empty:
+                raise ValueError("No Flipkart products matched")
 
-        # FK brand extraction
-        fk_matched["Brand"] = fk_matched["Product Name"].apply(
-            lambda x: str(x).split()[0].upper() if str(x).split() else "Unknown"
-        )
-        fk_brands = (
-            fk_matched.groupby("Brand")
-            .agg(
-                Products=("Product Name", "count"),
-                Avg_Price=("Selling Price", "mean"),
-                Total_Ratings=("Rating Count", "sum"),
-                Avg_Rating=("Rating", "mean"),
+            # Ensure Importance column is numeric
+            if "Importance" not in fk_matched.columns:
+                fk_matched["Importance"] = pd.to_numeric(fk_matched.get("Rating Count", 0), errors="coerce").fillna(0)
+            else:
+                fk_matched["Importance"] = pd.to_numeric(fk_matched["Importance"], errors="coerce").fillna(0)
+
+            fk_matched = fk_matched.sort_values("Importance", ascending=False)
+
+            fk_price_valid = pd.to_numeric(fk_matched["Selling Price"], errors="coerce").dropna()
+            fk_stats = {
+                "Median": round(float(fk_price_valid.median()), 0) if len(fk_price_valid) > 0 else 0,
+                "Q1": round(float(fk_price_valid.quantile(0.25)), 0) if len(fk_price_valid) > 0 else 0,
+                "Q3": round(float(fk_price_valid.quantile(0.75)), 0) if len(fk_price_valid) > 0 else 0,
+                "Mean": round(float(fk_price_valid.mean()), 0) if len(fk_price_valid) > 0 else 0,
+            }
+
+            # FK brand extraction
+            fk_matched["Brand"] = fk_matched["Product Name"].apply(
+                lambda x: str(x).split()[0].upper() if str(x).split() else "Unknown"
             )
-            .sort_values("Total_Ratings", ascending=False)
-            .head(20)
-            .reset_index()
-            .fillna(0)
-        )
+            fk_brands = (
+                fk_matched.groupby("Brand")
+                .agg(
+                    Products=("Product Name", "count"),
+                    Avg_Price=("Selling Price", "mean"),
+                    Total_Ratings=("Rating Count", "sum"),
+                    Avg_Rating=("Rating", "mean"),
+                )
+                .sort_values("Total_Ratings", ascending=False)
+                .head(20)
+                .reset_index()
+                .fillna(0)
+            )
 
-        fk_bands = _price_bands(fk_price_valid)
+            fk_bands = _price_bands(fk_price_valid)
 
-        results["fk_count"] = len(fk_matched)
-        results["fk_stats"] = fk_stats
-        results["fk_brands"] = fk_brands.to_dict("records")
-        results["fk_bands"] = fk_bands
-        results["fk_top_products"] = (
-            fk_matched.nlargest(20, "Importance")[
-                ["Product Name", "Selling Price", "MRP", "Rating", "Rating Count", "Page Name", "Brand"]
-            ]
-            .fillna("")
-            .to_dict("records")
-        )
-    else:
+            # Safe column selection — only include columns that exist
+            fk_prod_cols = [c for c in ["Product Name", "Selling Price", "MRP", "Rating", "Rating Count", "Page Name", "Brand"] if c in fk_matched.columns]
+            results["fk_count"] = len(fk_matched)
+            results["fk_stats"] = fk_stats
+            results["fk_brands"] = fk_brands.to_dict("records")
+            results["fk_bands"] = fk_bands
+            results["fk_top_products"] = (
+                fk_matched.head(20)[fk_prod_cols]
+                .fillna("")
+                .to_dict("records")
+            )
+        else:
+            raise ValueError("Flipkart data empty or missing columns")
+    except Exception:
         results["fk_count"] = 0
         results["fk_stats"] = fk_stats
         results["fk_brands"] = []
