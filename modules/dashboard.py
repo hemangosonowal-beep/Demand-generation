@@ -179,7 +179,7 @@ def _build_html(category: str, gen_date: str, b64_data: str) -> str:
   <h1 id="page-title">Demand Analysis — {category}</h1>
   <div class="sub">Generated {gen_date} | JioMart Category Intelligence</div>
 </div>
-<div class="nav" id="nav"></div>
+<div class="nav-wrap"><div class="nav" id="nav"></div></div>
 <div class="container" id="content"></div>
 <script>
 const B64 = "{b64_data}";
@@ -275,7 +275,50 @@ tr:hover { background:var(--highlight); }
 .brand-card { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:20px; }
 .brand-card .brand-name { font-weight:700; color:var(--navy); font-size:15px; margin-bottom:4px; }
 .brand-card .brand-meta { font-size:12px; color:var(--steel); }
-@media(max-width:768px) { .header{padding:24px} .header h1{font-size:24px} .nav{padding:0 16px} .nav a{margin-right:16px;font-size:12px} .container{padding:16px} .metric-grid.cols-3,.metric-grid.cols-4,.metric-grid.cols-6{grid-template-columns:1fr} .two-col{grid-template-columns:1fr} .complication-cards{grid-template-columns:1fr} .metrics-bar{grid-template-columns:repeat(3,1fr)} .seasonal-grid{grid-template-columns:repeat(2,1fr)} .brand-cards{grid-template-columns:1fr} }
+/* Nav scroll fade indicators */
+.nav { -ms-overflow-style:none; scrollbar-width:none; position:relative; }
+.nav::-webkit-scrollbar { display:none; }
+.nav-wrap { position:relative; }
+.nav-wrap::after { content:''; position:absolute; right:0; top:0; bottom:0; width:40px; background:linear-gradient(90deg,transparent,var(--card)); pointer-events:none; z-index:101; }
+
+/* Collapsible text */
+.collapsible-text { max-height:60px; overflow:hidden; transition:max-height 0.3s ease; position:relative; }
+.collapsible-text.expanded { max-height:2000px; }
+.collapsible-text:not(.expanded)::after { content:''; position:absolute; bottom:0; left:0; right:0; height:30px; background:linear-gradient(transparent,var(--navy-light)); }
+.toggle-btn { background:none; border:1px solid rgba(255,255,255,0.3); color:#fff; padding:4px 14px; border-radius:4px; font-size:11px; cursor:pointer; margin-top:8px; font-family:inherit; }
+.toggle-btn:hover { background:rgba(255,255,255,0.1); }
+.toggle-btn.dark { border-color:var(--border); color:var(--steel); }
+.toggle-btn.dark:hover { background:var(--highlight); }
+
+/* Action queue show-more */
+.action-hidden { display:none; }
+.show-more-btn { width:100%; padding:12px; background:var(--highlight); border:1px dashed var(--border); border-radius:8px; font-size:13px; font-weight:600; color:var(--navy); cursor:pointer; margin:8px 0 16px; font-family:inherit; }
+.show-more-btn:hover { background:var(--card); border-color:var(--navy); }
+
+/* Mobile table → card view */
+@media(max-width:768px) {
+  .header{padding:24px} .header h1{font-size:24px}
+  .nav{padding:0 16px} .nav a{margin-right:16px;font-size:12px}
+  .container{padding:16px}
+  .metric-grid.cols-3,.metric-grid.cols-4,.metric-grid.cols-6{grid-template-columns:1fr}
+  .two-col{grid-template-columns:1fr}
+  .complication-cards{grid-template-columns:1fr}
+  .metrics-bar{grid-template-columns:repeat(2,1fr)}
+  .seasonal-grid{grid-template-columns:repeat(2,1fr)}
+  .brand-cards{grid-template-columns:1fr}
+  .metric-card .value{font-size:24px}
+  .action-card{flex-direction:column;gap:8px}
+  .action-card .action-gmv{align-self:flex-start}
+  .headline{font-size:13px;padding:14px 16px}
+  .so-what-box{font-size:12px;padding:10px 14px}
+  .insight-card{padding:16px}
+  /* Card-view tables on mobile */
+  .m-card-view thead{display:none}
+  .m-card-view tbody tr{display:block;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:10px}
+  .m-card-view tbody td{display:flex;justify-content:space-between;padding:4px 0;border:none;font-size:13px}
+  .m-card-view tbody td::before{content:attr(data-label);font-weight:600;color:var(--navy);margin-right:12px;white-space:nowrap}
+  .m-card-view tbody td:first-child{font-weight:600;color:var(--navy)}
+}
 </style>"""
 
 
@@ -321,7 +364,7 @@ function pillHTML(t,text){const cls=t==='High'?'high':t==='Medium'?'medium':t===
 // TAB 0: Executive Brief
 let execHTML = `<div class="tab active" id="tab-exec">`;
 const ex = D.executive;
-execHTML += `<div class="scr-banner"><div class="scr-label">Situation</div>${ex.situation}</div>`;
+execHTML += `<div class="scr-banner"><div class="scr-label">Situation</div><div class="collapsible-text" id="scr-sit">${ex.situation}</div><button class="toggle-btn" onclick="toggleText('scr-sit',this)">Read more</button></div>`;
 const ws_pct = D.demand_gaps?(100-D.demand_gaps.coverage_pct).toFixed(0):'—';
 const brand_gaps = (D.brands.only_amazon||[]).length;
 const cov_pct = D.demand_gaps?D.demand_gaps.coverage_pct:0;
@@ -347,7 +390,16 @@ const top3=actions.slice(0,3).reduce((s,a)=>s+(a.gmv_potential||0),0);
 const top3P=totalGMV>0?Math.round(top3/totalGMV*100):0;
 let actHTML=`<div class="tab" id="tab-actions"><div class="headline">There are ${actions.length} actions worth ${fmt(totalGMV)}/month. Top 3 = ${top3P}% of opportunity.</div>`;
 actHTML+=`<div class="chart-container"><canvas id="chart-ie" height="300"></canvas></div>`;
+// Top 5 action cards
+actHTML+=`<div class="section-title">Top 5 Priority Actions</div>`;
+actions.slice(0,5).forEach((a,i)=>{
+  const tl=a.type==='Demand Gap'||a.type==='Rising Demand'?'Immediate':a.type==='Brand Gap'?'This Quarter':'Next Quarter';
+  actHTML+=`<div class="action-card"><div class="action-num">${i+1}</div><div class="action-body"><div class="action-title">${a.action}</div><div class="action-meta">${pillHTML(a.impact,a.impact)} ${pillHTML(a.type==='Demand Gap'?'gap':'covered',a.type)} · ${a.effort} effort · ${tl}</div></div><div class="action-gmv">${fmt(a.gmv_potential)}</div></div>`;
+});
+if(actions.length>5){actHTML+=`<button class="show-more-btn" onclick="toggleAllActions(this)">Show all ${actions.length} actions ▾</button>`}
+// Full table (hidden initially if >5)
 const aTypes=[...new Set(actions.map(a=>a.type))];
+actHTML+=`<div id="full-action-list" ${actions.length>5?'class="action-hidden"':''}>`;
 actHTML+=`<div class="filter-pills"><div class="filter-pill active" onclick="filterA('all',this)">All</div>`;
 aTypes.forEach(t=>{actHTML+=`<div class="filter-pill" onclick="filterA('${t}',this)">${t}</div>`});
 actHTML+=`</div><div style="overflow-x:auto"><table id="atbl"><thead><tr><th>#</th><th>Type</th><th>Action</th><th>Impact</th><th>Est. GMV/mo</th><th>Effort</th><th>Timeline</th><th>Rationale</th></tr></thead><tbody>`;
@@ -355,16 +407,17 @@ actions.forEach(a=>{
   const tl=a.type==='Demand Gap'||a.type==='Rising Demand'?'Immediate':a.type==='Brand Gap'?'This Quarter':'Next Quarter';
   actHTML+=`<tr data-type="${a.type}"><td style="font-weight:700;color:var(--navy)">${a.priority}</td><td>${pillHTML(a.type==='Demand Gap'?'High':'Medium',a.type)}</td><td style="font-weight:500;color:var(--navy)">${a.action}</td><td>${pillHTML(a.impact,a.impact)}</td><td style="text-align:right;font-weight:700;color:var(--navy)">${fmt(a.gmv_potential)}</td><td>${a.effort}</td><td>${tl}</td><td style="font-size:12px">${a.rationale}</td></tr>`;
 });
-actHTML+=`</tbody><tfoot><tr class="takeaway-row"><td colspan="4">Total GMV</td><td style="text-align:right">${fmt(totalGMV)}/mo</td><td colspan="3">${actions.length} actions</td></tr></tfoot></table></div></div>`;
+actHTML+=`</tbody><tfoot><tr class="takeaway-row"><td colspan="4">Total GMV</td><td style="text-align:right">${fmt(totalGMV)}/mo</td><td colspan="3">${actions.length} actions</td></tr></tfoot></table></div></div></div>`;
 
 // TAB 2: Demand Gaps
 const g=D.demand_gaps||{};
 let gHTML=`<div class="tab" id="tab-gaps"><div class="headline">JioMart captures ${g.coverage_pct||0}% of demand. ${g.total_whitespace||0} whitespace keywords have zero JM presence.</div>`;
 const wP=(100-(g.coverage_pct||0)).toFixed(0);
 gHTML+=`<div class="stacked-bar"><div style="width:${g.coverage_pct||0}%;background:var(--teal)">${g.coverage_pct||0}% Covered</div><div style="width:${wP}%;background:var(--coral)">${wP}% Whitespace</div></div>`;
+gHTML+=`<div class="chart-container"><canvas id="chart-dg" height="300"></canvas></div>`;
 gHTML+=`<input class="search-input" placeholder="Search keywords..." oninput="searchT('gtbl',this.value)">`;
-gHTML+=`<div class="section-title">Whitespace Keywords</div><div style="overflow-x:auto"><table id="gtbl"><thead><tr><th>#</th><th>Keyword</th><th>Google Vol</th><th>Competition</th><th>YoY</th><th>Est. GMV</th><th>Status</th></tr></thead><tbody>`;
-(g.whitespace||[]).forEach((k,i)=>{gHTML+=`<tr><td>${i+1}</td><td style="font-weight:500;color:var(--navy)">${k.keyword}</td><td style="text-align:right">${fmtNum(k.google_vol)}</td><td>${k.competition||'—'}</td><td>${k.yoy_change||'—'}</td><td style="text-align:right;font-weight:600">${fmt(k.gmv_opportunity)}</td><td>${pillHTML('gap','Whitespace')}</td></tr>`});
+gHTML+=`<div class="section-title">Whitespace Keywords</div><div style="overflow-x:auto"><table id="gtbl" class="m-card-view"><thead><tr><th>#</th><th>Keyword</th><th>Google Vol</th><th>Competition</th><th>YoY</th><th>Est. GMV</th><th>Status</th></tr></thead><tbody>`;
+(g.whitespace||[]).forEach((k,i)=>{gHTML+=`<tr><td data-label="#">${i+1}</td><td data-label="Keyword" style="font-weight:500;color:var(--navy)">${k.keyword}</td><td data-label="Google Vol" style="text-align:right">${fmtNum(k.google_vol)}</td><td data-label="Competition">${k.competition||'—'}</td><td data-label="YoY">${k.yoy_change||'—'}</td><td data-label="Est. GMV" style="text-align:right;font-weight:600">${fmt(k.gmv_opportunity)}</td><td data-label="Status">${pillHTML('gap','Whitespace')}</td></tr>`});
 gHTML+=`</tbody></table></div>`;
 gHTML+=`<div class="section-title" style="margin-top:32px">Covered Keywords</div><div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Keyword</th><th>Google Vol</th><th>JM Vol</th><th>Competition</th><th>Status</th></tr></thead><tbody>`;
 (g.coverage||[]).forEach((k,i)=>{gHTML+=`<tr><td>${i+1}</td><td style="font-weight:500;color:var(--navy)">${k.keyword}</td><td style="text-align:right">${fmtNum(k.google_vol)}</td><td style="text-align:right">${fmtNum(k.jm_volume)}</td><td>${k.competition||'—'}</td><td>${pillHTML('covered','Covered')}</td></tr>`});
@@ -378,11 +431,11 @@ const aM=Math.round(aS.Median||0);const fM=Math.round(fS.Median||0);
 const pD=aM>0?Math.round((aM-fM)/aM*100):0;
 let bHTML=`<div class="tab" id="tab-brands"><div class="headline">${(br.only_amazon||[]).length} brands on Amazon missing from FK. Amazon median ₹${fmtNum(aM)} is ${pD}% above Flipkart ₹${fmtNum(fM)}.</div>`;
 bHTML+=`<div class="metric-grid cols-3"><div class="metric-card" style="border-left:4px solid var(--amz)"><div class="label">Amazon</div><div class="value" style="color:var(--amz)">₹${fmtNum(aM)}</div><div class="delta">Median · ${D.executive.kpi_cards[2].value} products</div></div><div class="metric-card" style="border-left:4px solid var(--fk)"><div class="label">Flipkart</div><div class="value" style="color:var(--fk)">₹${fmtNum(fM)}</div><div class="delta">Median · ${D.executive.kpi_cards[3].value} products</div></div><div class="metric-card" style="border-left:4px solid var(--coral)"><div class="label">Price Delta</div><div class="value">${pD}%</div><div class="delta">Amazon premium</div></div></div>`;
-bHTML+=`<div class="section-title">Top Amazon Brands</div><div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Brand</th><th>Products</th><th>Avg Price</th><th>Units/30d</th><th>Rating</th></tr></thead><tbody>`;
-(br.amazon||[]).forEach((b,i)=>{bHTML+=`<tr><td>${i+1}</td><td style="font-weight:600;color:var(--navy)">${b.Brand}</td><td>${b.Products||'—'}</td><td>₹${fmtNum(Math.round(b.Avg_Price||0))}</td><td>${fmtNum(Math.round(b.Total_Qty||0))}</td><td>${(b.Avg_Rating||0).toFixed(1)}</td></tr>`});
+bHTML+=`<div class="section-title">Top Amazon Brands</div><div style="overflow-x:auto"><table class="m-card-view"><thead><tr><th>#</th><th>Brand</th><th>Products</th><th>Avg Price</th><th>Units/30d</th><th>Rating</th></tr></thead><tbody>`;
+(br.amazon||[]).forEach((b,i)=>{bHTML+=`<tr><td data-label="#">${i+1}</td><td data-label="Brand" style="font-weight:600;color:var(--navy)">${b.Brand}</td><td data-label="Products">${b.Products||'—'}</td><td data-label="Avg Price">₹${fmtNum(Math.round(b.Avg_Price||0))}</td><td data-label="Units/30d">${fmtNum(Math.round(b.Total_Qty||0))}</td><td data-label="Rating">${(b.Avg_Rating||0).toFixed(1)}</td></tr>`});
 bHTML+=`</tbody></table></div>`;
-bHTML+=`<div class="section-title">Top Flipkart Brands</div><div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Brand</th><th>Products</th><th>Avg Price</th><th>Ratings</th><th>Rating</th></tr></thead><tbody>`;
-(br.flipkart||[]).forEach((b,i)=>{bHTML+=`<tr><td>${i+1}</td><td style="font-weight:600;color:var(--navy)">${b.Brand}</td><td>${b.Products||'—'}</td><td>₹${fmtNum(Math.round(b.Avg_Price||0))}</td><td>${fmtNum(Math.round(b.Total_Ratings||0))}</td><td>${(b.Avg_Rating||0).toFixed(1)}</td></tr>`});
+bHTML+=`<div class="section-title">Top Flipkart Brands</div><div style="overflow-x:auto"><table class="m-card-view"><thead><tr><th>#</th><th>Brand</th><th>Products</th><th>Avg Price</th><th>Ratings</th><th>Rating</th></tr></thead><tbody>`;
+(br.flipkart||[]).forEach((b,i)=>{bHTML+=`<tr><td data-label="#">${i+1}</td><td data-label="Brand" style="font-weight:600;color:var(--navy)">${b.Brand}</td><td data-label="Products">${b.Products||'—'}</td><td data-label="Avg Price">₹${fmtNum(Math.round(b.Avg_Price||0))}</td><td data-label="Ratings">${fmtNum(Math.round(b.Total_Ratings||0))}</td><td data-label="Rating">${(b.Avg_Rating||0).toFixed(1)}</td></tr>`});
 bHTML+=`</tbody></table></div>`;
 if((br.market_leaders||[]).length){bHTML+=`<div class="section-title">Industry Leaders</div><div class="brand-cards">`;(br.market_leaders||[]).forEach(b=>{bHTML+=`<div class="brand-card"><div class="brand-name">${b}</div><div class="brand-meta">Verify JM listing</div></div>`});bHTML+=`</div>`}
 bHTML+=`</div>`;
@@ -393,17 +446,17 @@ const bLabels=Object.keys(aBands);
 let prHTML=`<div class="tab" id="tab-pricing"><div class="headline">Amazon median ₹${fmtNum(aM)} vs Flipkart ₹${fmtNum(fM)} (${pD}% delta). Target the ₹${fmtNum(Math.round(aS.Q1||0))}–₹${fmtNum(Math.round(aS.Q3||0))} range.</div>`;
 prHTML+=`<div class="metric-grid cols-4"><div class="metric-card"><div class="label">AMZ Median</div><div class="value">₹${fmtNum(aM)}</div><div class="delta">Q1-Q3: ₹${fmtNum(Math.round(aS.Q1||0))}-₹${fmtNum(Math.round(aS.Q3||0))}</div></div><div class="metric-card"><div class="label">FK Median</div><div class="value">₹${fmtNum(fM)}</div><div class="delta">Q1-Q3: ₹${fmtNum(Math.round(fS.Q1||0))}-₹${fmtNum(Math.round(fS.Q3||0))}</div></div><div class="metric-card"><div class="label">AMZ Mean</div><div class="value">₹${fmtNum(Math.round(aS.Mean||0))}</div><div class="delta">Indicates premium tail</div></div><div class="metric-card"><div class="label">FK Mean</div><div class="value">₹${fmtNum(Math.round(fS.Mean||0))}</div><div class="delta">Lower positioning</div></div></div>`;
 prHTML+=`<div class="chart-container"><canvas id="chart-pb" height="280"></canvas></div>`;
-prHTML+=`<div class="two-col"><div><div class="section-title">Top Amazon Products</div><table><thead><tr><th>Product</th><th>Price</th><th>Units</th><th>Ratings</th><th>Rating</th></tr></thead><tbody>`;
-(pr.amz_top_products||[]).slice(0,15).forEach(p=>{prHTML+=`<tr><td style="font-size:12px">${(p.Title||p['Product Name']||'').substring(0,60)}</td><td>₹${fmtNum(Math.round(p['Offer Price']||0))}</td><td>${fmtNum(p['Qty bought in last 30 days']||0)}</td><td>${fmtNum(Math.round(p['Rating Count']||0))}</td><td>${(p.Rating||0).toFixed(1)}</td></tr>`});
-prHTML+=`</tbody></table></div><div><div class="section-title">Top Flipkart Products</div><table><thead><tr><th>Product</th><th>Price</th><th>Ratings</th><th>Rating</th></tr></thead><tbody>`;
-(pr.fk_top_products||[]).slice(0,15).forEach(p=>{prHTML+=`<tr><td style="font-size:12px">${(p['Product Name']||'').substring(0,60)}</td><td>₹${fmtNum(Math.round(p['Selling Price']||0))}</td><td>${fmtNum(Math.round(p['Rating Count']||0))}</td><td>${(Number(p.Rating)||0).toFixed(1)}</td></tr>`});
+prHTML+=`<div class="two-col"><div><div class="section-title">Top Amazon Products</div><table class="m-card-view"><thead><tr><th>Product</th><th>Price</th><th>Units</th><th>Ratings</th><th>Rating</th></tr></thead><tbody>`;
+(pr.amz_top_products||[]).slice(0,15).forEach(p=>{prHTML+=`<tr><td data-label="Product" style="font-size:12px">${(p.Title||p['Product Name']||'').substring(0,60)}</td><td data-label="Price">₹${fmtNum(Math.round(p['Offer Price']||0))}</td><td data-label="Units">${fmtNum(p['Qty bought in last 30 days']||0)}</td><td data-label="Ratings">${fmtNum(Math.round(p['Rating Count']||0))}</td><td data-label="Rating">${(p.Rating||0).toFixed(1)}</td></tr>`});
+prHTML+=`</tbody></table></div><div><div class="section-title">Top Flipkart Products</div><table class="m-card-view"><thead><tr><th>Product</th><th>Price</th><th>Ratings</th><th>Rating</th></tr></thead><tbody>`;
+(pr.fk_top_products||[]).slice(0,15).forEach(p=>{prHTML+=`<tr><td data-label="Product" style="font-size:12px">${(p['Product Name']||'').substring(0,60)}</td><td data-label="Price">₹${fmtNum(Math.round(p['Selling Price']||0))}</td><td data-label="Ratings">${fmtNum(Math.round(p['Rating Count']||0))}</td><td data-label="Rating">${(Number(p.Rating)||0).toFixed(1)}</td></tr>`});
 prHTML+=`</tbody></table></div></div></div>`;
 
 // TAB 5: Forecast & Planning
 const fc=D.forecast||{};const fcKw=fc.keywords||[];
 let fcHTML=`<div class="tab" id="tab-forecast"><div class="headline">${fcKw.length} keywords tracked. ${fcKw.filter(k=>k.cagr_pct>15).length} show >15% CAGR — prioritize these.</div>`;
-fcHTML+=`<div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Keyword</th><th>Current Vol</th><th>Forecast</th><th>YoY</th><th>CAGR %</th><th>Priority</th></tr></thead><tbody>`;
-fcKw.slice(0,25).forEach((k,i)=>{const s=k.cagr_pct>15?'border-left:3px solid var(--teal)':'';fcHTML+=`<tr style="${s}"><td>${i+1}</td><td style="font-weight:500;color:var(--navy)">${k.keyword}</td><td style="text-align:right">${fmtNum(Math.round(k.current_vol||0))}</td><td style="text-align:right">${fmtNum(Math.round(k.forecast_vol||0))}</td><td style="text-align:right">${(k.yoy_ratio||0).toFixed(2)}x</td><td style="text-align:right">${(k.cagr_pct||0).toFixed(1)}%</td><td style="text-align:right;font-weight:700">${(k.priority_score||0).toFixed(1)}</td></tr>`});
+fcHTML+=`<div style="overflow-x:auto"><table class="m-card-view"><thead><tr><th>#</th><th>Keyword</th><th>Current Vol</th><th>Forecast</th><th>YoY</th><th>CAGR %</th><th>Priority</th></tr></thead><tbody>`;
+fcKw.slice(0,25).forEach((k,i)=>{const s=k.cagr_pct>15?'border-left:3px solid var(--teal)':'';fcHTML+=`<tr style="${s}"><td data-label="#">${i+1}</td><td data-label="Keyword" style="font-weight:500;color:var(--navy)">${k.keyword}</td><td data-label="Current Vol" style="text-align:right">${fmtNum(Math.round(k.current_vol||0))}</td><td data-label="Forecast" style="text-align:right">${fmtNum(Math.round(k.forecast_vol||0))}</td><td data-label="YoY" style="text-align:right">${(k.yoy_ratio||0).toFixed(2)}x</td><td data-label="CAGR %" style="text-align:right">${(k.cagr_pct||0).toFixed(1)}%</td><td data-label="Priority" style="text-align:right;font-weight:700">${(k.priority_score||0).toFixed(1)}</td></tr>`});
 fcHTML+=`</tbody></table></div>`;
 const seasonal=D.seasonal||{};const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 fcHTML+=`<div class="section-title">Seasonal Calendar</div><div class="seasonal-grid">`;
@@ -415,7 +468,7 @@ fcHTML+=`</div></div>`;
 const mkt=D.market||{};const cards=D.insight_cards||[];
 let mHTML=`<div class="tab" id="tab-market"><div class="headline">${D.category} — ${mkt.market_size||'Enable API for data'}. CAGR: ${mkt.cagr||'—'}.</div>`;
 mHTML+=`<div class="metric-grid cols-3"><div class="metric-card"><div class="label">Market Size</div><div class="value" style="font-size:24px">${mkt.market_size||'—'}</div></div><div class="metric-card"><div class="label">CAGR</div><div class="value">${mkt.cagr||'—'}</div></div><div class="metric-card"><div class="label">Key Segments</div><div style="font-size:13px;margin-top:8px;color:var(--navy)">${mkt.key_segments||'—'}</div></div></div>`;
-if(cards.length){mHTML+=`<div class="section-title">Strategic Insights</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">`;cards.forEach(c=>{const cls=c.impact==='High'?'impact-high':'impact-medium';mHTML+=`<div class="insight-card ${cls}"><div style="margin-bottom:8px">${pillHTML(c.impact,c.impact)} <span style="font-size:11px;color:var(--steel);margin-left:8px">${c.category}</span></div><div style="font-size:13px;color:var(--steel);margin-bottom:8px">${c.finding}</div><div class="so-what-box">So What? ${c.sowhat}</div></div>`});mHTML+=`</div>`}
+if(cards.length){mHTML+=`<div class="section-title">Strategic Insights</div><div class="two-col">`;cards.forEach(c=>{const cls=c.impact==='High'?'impact-high':'impact-medium';mHTML+=`<div class="insight-card ${cls}"><div style="margin-bottom:8px">${pillHTML(c.impact,c.impact)} <span style="font-size:11px;color:var(--steel);margin-left:8px">${c.category}</span></div><div style="font-size:13px;color:var(--steel);margin-bottom:8px">${c.finding}</div><div class="so-what-box">So What? ${c.sowhat}</div></div>`});mHTML+=`</div>`}
 const segs=mkt.price_segments||{};
 if(Object.keys(segs).length){mHTML+=`<div class="section-title">Price Segments</div><div class="metric-grid cols-4">`;Object.entries(segs).forEach(([k,v])=>{mHTML+=`<div class="metric-card"><div class="label">${k}</div><div style="font-size:13px;margin-top:8px;color:var(--navy)">${v}</div></div>`});mHTML+=`</div>`}
 if((mkt.top_india_brands||[]).length){mHTML+=`<div class="section-title">Key Brands</div><div class="brand-cards">`;mkt.top_india_brands.forEach(b=>{mHTML+=`<div class="brand-card"><div class="brand-name">${b}</div></div>`});mHTML+=`</div>`}
@@ -443,7 +496,24 @@ setTimeout(()=>{
   if(c2){const aBd=D.pricing&&D.pricing.amazon_bands||{};const fBd=D.pricing&&D.pricing.flipkart_bands||{};const lb=Object.keys(aBd);if(lb.length){new Chart(c2,{type:'bar',data:{labels:lb,datasets:[{label:'Amazon',data:lb.map(l=>aBd[l]||0),backgroundColor:'rgba(255,153,0,0.8)',borderRadius:4},{label:'Flipkart',data:lb.map(l=>fBd[l]||0),backgroundColor:'rgba(40,116,240,0.8)',borderRadius:4}]},options:{responsive:true,indexAxis:'y',plugins:{title:{display:true,text:'Price Band: Amazon vs Flipkart',font:{size:16,weight:'700'},color:'#051C2C'}},scales:{x:{beginAtZero:true}}}})}}
 },200);
 
+// Demand gap horizontal bar chart
+setTimeout(()=>{
+  const c3=document.getElementById('chart-dg');
+  if(c3){
+    const ws=(D.demand_gaps&&D.demand_gaps.whitespace)||[];
+    const top10=ws.slice(0,10).reverse();
+    if(top10.length){
+      new Chart(c3,{type:'bar',data:{labels:top10.map(k=>k.keyword.length>25?k.keyword.substring(0,25)+'…':k.keyword),datasets:[{label:'Google Search Vol',data:top10.map(k=>k.google_vol||0),backgroundColor:'rgba(224,90,71,0.8)',borderRadius:4},{label:'Est. GMV Opportunity',data:top10.map(k=>k.gmv_opportunity||0),backgroundColor:'rgba(0,166,160,0.8)',borderRadius:4}]},options:{indexAxis:'y',responsive:true,plugins:{title:{display:true,text:'Top 10 Whitespace Keywords — Demand vs GMV',font:{size:16,weight:'700'},color:'#051C2C'}},scales:{x:{beginAtZero:true,ticks:{callback:v=>v>=100000?'₹'+(v/100000).toFixed(0)+'L':v>=1000?(v/1000).toFixed(0)+'K':v}}}}})
+    }
+  }
+},300);
+
 function togAcc(id){const b=document.getElementById(id);const i=document.getElementById('i-'+id);b.classList.toggle('open');i.textContent=b.classList.contains('open')?'▾':'▸'}
 function searchT(tid,q){const t=document.getElementById(tid);if(!t)return;t.querySelectorAll('tbody tr').forEach(r=>{r.style.display=r.textContent.toLowerCase().includes(q.toLowerCase())?'':'none'})}
 function filterA(type,el){document.querySelectorAll('.filter-pill').forEach(p=>p.classList.remove('active'));el.classList.add('active');document.querySelectorAll('#atbl tbody tr').forEach(r=>{r.style.display=(type==='all'||r.dataset.type===type)?'':'none'})}
+function toggleText(id,btn){const el=document.getElementById(id);el.classList.toggle('expanded');btn.textContent=el.classList.contains('expanded')?'Show less':'Read more'}
+function toggleAllActions(btn){const el=document.getElementById('full-action-list');el.classList.toggle('action-hidden');btn.textContent=el.classList.contains('action-hidden')?'Show all '+actions.length+' actions ▾':'Collapse ▴'}
+
+// Auto-expand SCR text if short (< 100 chars)
+setTimeout(()=>{const sit=document.getElementById('scr-sit');if(sit&&sit.scrollHeight<=60){sit.classList.add('expanded');const btn=sit.nextElementSibling;if(btn)btn.style.display='none'}},50);
 """
