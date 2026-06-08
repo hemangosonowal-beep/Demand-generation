@@ -152,6 +152,10 @@ def _compile_data(results: dict, insights: dict) -> dict:
         "google_trends": results.get("google_trends") or {},
         "jm_seasonality": results.get("jm_seasonality") or {},
         "youtube_suggestions": results.get("youtube_suggestions") or {},
+        "ai_readiness": {
+            "intents": results.get("ai_intents") or {},
+            "paa": results.get("paa_questions") or {},
+        },
         "data_availability": {
             "jm_search": results.get("jm_data_available") is not False,
             "keyword_planner": results.get("kp_data_available") is not False,
@@ -340,7 +344,8 @@ Chart.defaults.plugins.tooltip.padding = 12;
 const TABS = [
   {id:'exec',label:'Executive Brief'},{id:'actions',label:'Action Queue'},
   {id:'gaps',label:'Demand Gaps'},{id:'brands',label:'Brand & Sourcing'},
-  {id:'pricing',label:'Price Positioning'},{id:'forecast',label:'Trends & Forecast'}
+  {id:'pricing',label:'Price Positioning'},{id:'forecast',label:'Trends & Forecast'},
+  {id:'ai',label:'AI Readiness'}
 ];
 
 const nav = document.getElementById('nav');
@@ -527,7 +532,79 @@ fcHTML+=`<div style="overflow-x:auto"><table class="m-card-view"><thead><tr><th>
 fcKw.slice(0,25).forEach((k,i)=>{const s=k.cagr_pct>15?'border-left:3px solid var(--teal)':'';fcHTML+=`<tr style="${s}"><td data-label="#">${i+1}</td><td data-label="Keyword" style="font-weight:500;color:var(--navy)">${k.keyword}</td><td data-label="Current Vol" style="text-align:right">${fmtNum(Math.round(k.current_vol||0))}</td><td data-label="Forecast" style="text-align:right">${fmtNum(Math.round(k.forecast_vol||0))}</td><td data-label="YoY" style="text-align:right">${(k.yoy_ratio||0).toFixed(2)}x</td><td data-label="CAGR %" style="text-align:right">${(k.cagr_pct||0).toFixed(1)}%</td><td data-label="Priority" style="text-align:right;font-weight:700">${(k.priority_score||0).toFixed(1)}</td></tr>`});
 fcHTML+=`</tbody></table></div></div>`;
 
-content.innerHTML = execHTML+actHTML+gHTML+bHTML+prHTML+fcHTML;
+// TAB 6: AI Readiness
+const aiR=D.ai_readiness||{};const aiInt=aiR.intents||{};const aiPAA=aiR.paa||{};
+const aiDist=aiInt.distribution||[];const aiKw=aiInt.keywords||[];
+const aiScore=aiInt.ai_readiness_score||0;const aiTotal=aiInt.total_keywords||0;
+const paaQ=aiPAA.questions||[];const paaClusters=aiPAA.clusters||{};const paaTotal=aiPAA.total||0;
+let aiHTML=`<div class="tab" id="tab-ai">`;
+aiHTML+=`<div class="headline">AI Readiness Score: <strong>${aiScore}%</strong> — ${aiTotal} keywords classified across ${aiDist.length} intent buckets. ${paaTotal} question-format queries discovered for content strategy.</div>`;
+
+// Score card + summary metrics
+const scoreColor=aiScore>=50?'var(--teal)':aiScore>=30?'var(--amber)':'var(--coral)';
+const transVol=aiDist.find(d=>d.intent==='Transactional');
+const infoVol=aiDist.find(d=>d.intent==='Informational');
+const compVol=aiDist.find(d=>d.intent==='Comparison');
+aiHTML+=`<div class="metric-grid cols-4">`;
+aiHTML+=`<div class="metric-card" style="border-left:4px solid ${scoreColor}"><div class="label">AI Readiness Score</div><div class="value" style="color:${scoreColor}">${aiScore}%</div><div class="delta">Informational + Comparison + Voice queries</div></div>`;
+aiHTML+=`<div class="metric-card"><div class="label">Transactional</div><div class="value" style="font-size:24px">${transVol?transVol.pct:0}%</div><div class="delta">${transVol?fmtNum(transVol.count):0} keywords · Buy-intent</div></div>`;
+aiHTML+=`<div class="metric-card"><div class="label">Informational</div><div class="value" style="font-size:24px">${infoVol?infoVol.pct:0}%</div><div class="delta">${infoVol?fmtNum(infoVol.count):0} keywords · Content opportunity</div></div>`;
+aiHTML+=`<div class="metric-card"><div class="label">Comparison</div><div class="value" style="font-size:24px">${compVol?compVol.pct:0}%</div><div class="delta">${compVol?fmtNum(compVol.count):0} keywords · AI assistant fit</div></div>`;
+aiHTML+=`</div>`;
+
+// Donut chart + distribution table side by side
+aiHTML+=`<div class="section-title">Query Intent Distribution</div>`;
+aiHTML+=`<div class="two-col">`;
+aiHTML+=`<div class="chart-container"><canvas id="chart-intent-donut" height="300"></canvas></div>`;
+aiHTML+=`<div><table><thead><tr><th>Intent</th><th>Keywords</th><th>% Share</th><th>Volume</th><th>Vol %</th></tr></thead><tbody>`;
+const intentColors={'Transactional':'#00A6A0','Informational':'#2874F0','Comparison':'#D4920B','Price-sensitive':'#E05A47','Voice/Long-tail':'#9B59B6','Navigational':'#4A6274'};
+aiDist.forEach(d=>{
+  const ic=intentColors[d.intent]||'#4A6274';
+  aiHTML+=`<tr><td><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${ic};margin-right:8px"></span><span style="font-weight:600;color:var(--navy)">${d.intent}</span></td><td style="text-align:right">${fmtNum(d.count)}</td><td style="text-align:right;font-weight:600">${d.pct}%</td><td style="text-align:right">${fmtNum(d.volume)}</td><td style="text-align:right">${d.vol_pct}%</td></tr>`;
+});
+aiHTML+=`</tbody></table>`;
+aiHTML+=`<div class="so-what-box" style="margin-top:16px">So What? ${aiScore>=50?'High AI readiness — invest in conversational commerce, AI-powered product recommendations, and content marketing for informational queries.':aiScore>=30?'Moderate AI readiness — build content for comparison and informational queries while optimizing transactional funnel.':'Low AI readiness — demand is primarily transactional. Focus on search optimization, pricing, and direct conversion paths before AI content.'}</div>`;
+aiHTML+=`</div></div>`;
+
+// Top classified keywords table
+aiHTML+=`<div class="section-title">Top Keywords by Intent</div>`;
+aiHTML+=`<div class="filter-pills"><div class="filter-pill active" onclick="filterAI('all',this)">All</div>`;
+aiDist.forEach(d=>{aiHTML+=`<div class="filter-pill" onclick="filterAI('${d.intent}',this)">${d.intent} (${d.count})</div>`});
+aiHTML+=`</div>`;
+aiHTML+=`<input class="search-input" placeholder="Search keywords..." oninput="searchT('aitbl',this.value)">`;
+aiHTML+=`<div style="overflow-x:auto"><table id="aitbl" class="m-card-view"><thead><tr><th>#</th><th>Keyword</th><th>Volume</th><th>Source</th><th>Intent</th></tr></thead><tbody>`;
+aiKw.slice(0,80).forEach((k,i)=>{
+  const ic=intentColors[k.primary_intent]||'#4A6274';
+  aiHTML+=`<tr data-intent="${k.primary_intent}"><td data-label="#">${i+1}</td><td data-label="Keyword" style="font-weight:500;color:var(--navy)">${k.keyword}</td><td data-label="Volume" style="text-align:right">${fmtNum(Math.round(k.volume||0))}</td><td data-label="Source">${k.source}</td><td data-label="Intent"><span class="pill" style="background:${ic}20;color:${ic}">${k.primary_intent}</span></td></tr>`;
+});
+aiHTML+=`</tbody></table></div>`;
+
+// People Also Ask / Question Bank
+if(paaTotal>0){
+aiHTML+=`<div class="section-title" style="margin-top:32px">Question Bank — People Also Ask Proxy</div>`;
+aiHTML+=`<div style="font-size:13px;color:var(--steel);margin-bottom:16px">${paaTotal} questions scraped from Google autocomplete. ${Object.keys(paaClusters).length} intent clusters identified.</div>`;
+// Cluster cards
+const clusterKeys=Object.keys(paaClusters);
+aiHTML+=`<div class="metric-grid cols-3" style="margin-bottom:24px">`;
+clusterKeys.forEach(ck=>{
+  const cqs=paaClusters[ck]||[];
+  aiHTML+=`<div class="metric-card" style="border-left:4px solid var(--teal)"><div class="label">${ck}</div><div class="value" style="font-size:24px">${cqs.length}</div><div class="delta">questions found</div></div>`;
+});
+aiHTML+=`</div>`;
+
+// Question table
+aiHTML+=`<div style="overflow-x:auto"><table class="m-card-view"><thead><tr><th>#</th><th>Question</th><th>Source Term</th><th>Intent Cluster</th></tr></thead><tbody>`;
+paaQ.slice(0,60).forEach((q,i)=>{
+  aiHTML+=`<tr><td data-label="#">${i+1}</td><td data-label="Question" style="font-weight:500;color:var(--navy)">${q.question}</td><td data-label="Source">${q.source_term}</td><td data-label="Intent"><span class="pill" style="background:rgba(0,166,160,0.12);color:var(--teal)">${q.intent}</span></td></tr>`;
+});
+aiHTML+=`</tbody></table></div>`;
+
+// Content strategy so-what
+aiHTML+=`<div class="so-what-box">Content Strategy: Create ${clusterKeys.filter(k=>k.includes('Best')||k.includes('choose')).length>0?'buying guides and comparison articles':'FAQ pages and product education content'} to capture ${paaTotal} question-format queries. These queries signal pre-purchase research — ideal for AI chatbot training data and SEO content.</div>`;
+}
+aiHTML+=`</div>`;
+
+content.innerHTML = execHTML+actHTML+gHTML+bHTML+prHTML+fcHTML+aiHTML;
 
 // Charts
 setTimeout(()=>{
@@ -593,6 +670,19 @@ setTimeout(()=>{
   }
 },600);
 
+// AI Readiness intent donut chart
+setTimeout(()=>{
+  const c7=document.getElementById('chart-intent-donut');
+  if(c7){
+    const dist=D.ai_readiness&&D.ai_readiness.intents&&D.ai_readiness.intents.distribution||[];
+    if(dist.length){
+      const iColors={'Transactional':'#00A6A0','Informational':'#2874F0','Comparison':'#D4920B','Price-sensitive':'#E05A47','Voice/Long-tail':'#9B59B6','Navigational':'#4A6274'};
+      new Chart(c7,{type:'doughnut',data:{labels:dist.map(d=>d.intent),datasets:[{data:dist.map(d=>d.count),backgroundColor:dist.map(d=>iColors[d.intent]||'#4A6274'),borderWidth:2,borderColor:'#fff'}]},options:{responsive:true,cutout:'55%',plugins:{title:{display:true,text:'Query Intent Mix',font:{size:16,weight:'700'},color:'#051C2C'},legend:{position:'bottom',labels:{padding:16,font:{size:12}}}}}})
+    }
+  }
+},700);
+
+function filterAI(intent,el){document.querySelectorAll('.filter-pills .filter-pill').forEach(p=>p.classList.remove('active'));el.classList.add('active');document.querySelectorAll('#aitbl tbody tr').forEach(r=>{r.style.display=(intent==='all'||r.dataset.intent===intent)?'':'none'})}
 function togAcc(id){const b=document.getElementById(id);const i=document.getElementById('i-'+id);b.classList.toggle('open');i.textContent=b.classList.contains('open')?'▾':'▸'}
 function searchT(tid,q){const t=document.getElementById(tid);if(!t)return;t.querySelectorAll('tbody tr').forEach(r=>{r.style.display=r.textContent.toLowerCase().includes(q.toLowerCase())?'':'none'})}
 function filterA(type,el){document.querySelectorAll('.filter-pill').forEach(p=>p.classList.remove('active'));el.classList.add('active');document.querySelectorAll('#atbl tbody tr').forEach(r=>{r.style.display=(type==='all'||r.dataset.type===type)?'':'none'})}

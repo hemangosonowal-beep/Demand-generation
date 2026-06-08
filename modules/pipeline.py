@@ -330,6 +330,233 @@ def fetch_youtube_suggestions(category: str, keywords: list) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────
+# STEP 2e: AI Readiness — Query Intent Classification
+# ─────────────────────────────────────────────────────────────────────
+def classify_query_intents(jm_keywords: list, kp_df: pd.DataFrame) -> dict:
+    """Classify JM Search + KP keywords into intent buckets using regex patterns.
+
+    Intent buckets:
+    - Transactional: buy, price, offer, discount, online, order, cod, delivery
+    - Informational: how, what, which, guide, tips, benefits, uses, meaning
+    - Comparison: vs, versus, compare, difference, better, or, alternative
+    - Price-sensitive: under, below, budget, cheap, affordable, range, ₹, rs
+    - Voice/Long-tail: 5+ words, question-form ("best X for Y", "how to choose")
+    - Navigational: brand names, specific product model names
+    """
+    patterns = {
+        "Transactional": re.compile(
+            r'\b(buy|purchase|price|offer|discount|deal|sale|online|order|cod|'
+            r'delivery|free shipping|cash on delivery|add to cart|shop|booking)\b', re.I
+        ),
+        "Informational": re.compile(
+            r'\b(how|what|which|why|guide|tips|benefits|uses|meaning|'
+            r'types|features|advantages|disadvantages|review|reviews|'
+            r'explained|tutorial|learn|difference between)\b', re.I
+        ),
+        "Comparison": re.compile(
+            r'\b(vs|versus|compare|comparison|difference|better|'
+            r'alternative|or|top \d+|best \d+|ranking)\b', re.I
+        ),
+        "Price-sensitive": re.compile(
+            r'\b(under|below|budget|cheap|cheapest|affordable|range|'
+            r'low cost|value for money|worth|₹|rs\s?\d|inr)\b', re.I
+        ),
+        "Voice/Long-tail": re.compile(
+            r'^(best .+ for|how to (choose|select|pick)|what is the best|'
+            r'which .+ should i|top .+ in india|.+ for (home|kitchen|office|baby|kids))', re.I
+        ),
+    }
+
+    # Collect all keywords with volumes
+    all_keywords = []
+    for k in jm_keywords:
+        all_keywords.append({
+            "keyword": k["Keyword"],
+            "volume": k.get("total_vol", 0) or 0,
+            "source": "JM Search",
+        })
+
+    if not kp_df.empty and "Keyword" in kp_df.columns:
+        seen = {k["keyword"].lower() for k in all_keywords}
+        for _, row in kp_df.iterrows():
+            kw = str(row.get("Keyword", "")).strip()
+            if kw.lower() not in seen:
+                vol = float(row.get("Avg. monthly searches", 0) or 0)
+                all_keywords.append({
+                    "keyword": kw,
+                    "volume": vol,
+                    "source": "Google KP",
+                })
+                seen.add(kw.lower())
+
+    # Classify each keyword
+    intent_counts = {
+        "Transactional": 0, "Informational": 0, "Comparison": 0,
+        "Price-sensitive": 0, "Voice/Long-tail": 0, "Navigational": 0,
+    }
+    intent_volume = {k: 0 for k in intent_counts}
+    classified_keywords = []
+
+    for item in all_keywords:
+        kw = item["keyword"]
+        vol = item["volume"]
+        intents_found = []
+
+        # Check word count for long-tail
+        word_count = len(kw.split())
+
+        for intent_name, pattern in patterns.items():
+            if pattern.search(kw):
+                intents_found.append(intent_name)
+
+        # Long-tail by word count (5+ words)
+        if word_count >= 5 and "Voice/Long-tail" not in intents_found:
+            intents_found.append("Voice/Long-tail")
+
+        # Default to Navigational if no pattern matched
+        if not intents_found:
+            intents_found.append("Navigational")
+
+        primary = intents_found[0]
+        intent_counts[primary] += 1
+        intent_volume[primary] += vol
+
+        classified_keywords.append({
+            "keyword": kw,
+            "volume": vol,
+            "source": item["source"],
+            "primary_intent": primary,
+            "all_intents": intents_found,
+        })
+
+    # Sort by volume within each intent
+    classified_keywords.sort(key=lambda x: x["volume"], reverse=True)
+
+    total_kw = len(classified_keywords)
+    total_vol = sum(item["volume"] for item in classified_keywords)
+
+    # Intent distribution
+    distribution = []
+    for intent in ["Transactional", "Informational", "Comparison",
+                    "Price-sensitive", "Voice/Long-tail", "Navigational"]:
+        count = intent_counts[intent]
+        vol = intent_volume[intent]
+        distribution.append({
+            "intent": intent,
+            "count": count,
+            "pct": round(count / max(total_kw, 1) * 100, 1),
+            "volume": round(vol),
+            "vol_pct": round(vol / max(total_vol, 1) * 100, 1),
+        })
+
+    # AI readiness score: higher if more Informational + Comparison + Voice queries
+    # (these are queries AI/conversational commerce can serve well)
+    ai_friendly = (intent_counts["Informational"] + intent_counts["Comparison"] +
+                   intent_counts["Voice/Long-tail"])
+    ai_score = round(ai_friendly / max(total_kw, 1) * 100, 1)
+
+    return {
+        "distribution": distribution,
+        "keywords": classified_keywords[:100],
+        "total_keywords": total_kw,
+        "total_volume": round(total_vol),
+        "ai_readiness_score": ai_score,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────
+# STEP 2f: AI Readiness — People Also Ask scraping
+# ─────────────────────────────────────────────────────────────────────
+def fetch_people_also_ask(category: str, keywords: list) -> dict:
+    """Scrape Google autocomplete for question-format queries (PAA proxy).
+
+    Since actual PAA scraping requires a headless browser, we use Google
+    autocomplete with question prefixes as a reliable proxy.
+    """
+    result = {"questions": [], "clusters": {}, "total": 0}
+
+    prefixes = [
+        "best {} for",
+        "how to choose {}",
+        "which {} is best",
+        "{} vs",
+        "difference between {}",
+        "{} under",
+        "is {} worth",
+        "how to use {}",
+        "{} for home",
+        "{} buying guide",
+    ]
+
+    seen = set()
+    questions = []
+    query_terms = [category] + [k for k in keywords[:3] if k.lower() != category.lower()]
+
+    for term in query_terms:
+        for prefix in prefixes:
+            query = prefix.format(term)
+            try:
+                encoded = urllib.parse.quote(query)
+                url = f"https://suggestqueries.google.com/complete/search?client=firefox&q={encoded}"
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    raw = resp.read().decode("utf-8")
+                    data = json.loads(raw)
+                    suggestions = data[1] if len(data) > 1 else []
+                    for s in suggestions:
+                        s_clean = s.strip().lower()
+                        if s_clean not in seen and len(s_clean) > 5:
+                            seen.add(s_clean)
+                            # Classify question intent
+                            q_intent = _classify_question(s_clean)
+                            questions.append({
+                                "question": s_clean,
+                                "source_term": term,
+                                "intent": q_intent,
+                            })
+            except Exception:
+                continue
+
+    # Cluster questions by intent
+    clusters = {}
+    for q in questions:
+        intent = q["intent"]
+        if intent not in clusters:
+            clusters[intent] = []
+        clusters[intent].append(q)
+
+    result["questions"] = questions[:80]
+    result["clusters"] = {k: v[:15] for k, v in clusters.items()}
+    result["total"] = len(questions)
+
+    # Coverage: how many question types have JM content?
+    intent_types = set(q["intent"] for q in questions)
+    result["intent_types_found"] = len(intent_types)
+
+    return result
+
+
+def _classify_question(q: str) -> str:
+    """Classify a question into user-intent category."""
+    q_lower = q.lower()
+    if any(w in q_lower for w in ["best", "top", "recommend", "which"]):
+        return "Best for..."
+    if any(w in q_lower for w in ["how to choose", "how to select", "buying guide", "how to pick"]):
+        return "How to choose..."
+    if any(w in q_lower for w in ["vs", "versus", "difference", "compare", "or"]):
+        return "Difference between..."
+    if any(w in q_lower for w in ["under", "below", "budget", "cheap", "affordable"]):
+        return "Under ₹X"
+    if any(w in q_lower for w in ["how to use", "how to", "tutorial", "step"]):
+        return "How to use..."
+    if any(w in q_lower for w in ["worth", "review", "good", "bad"]):
+        return "Is it worth..."
+    if any(w in q_lower for w in ["for home", "for kitchen", "for office", "for baby"]):
+        return "Best for [use case]"
+    return "General"
+
+
+# ─────────────────────────────────────────────────────────────────────
 # STEP 3: Run full analysis
 # ─────────────────────────────────────────────────────────────────────
 def run_analysis(
@@ -593,8 +820,18 @@ def run_analysis(
     google_trends = fetch_google_trends(category, top_kw_names)
     results["google_trends"] = google_trends
 
+    # ── AI Readiness: Query Intent Classification ──
+    update("Classifying query intents for AI readiness...", 0.68)
+    ai_intents = classify_query_intents(jm_growth, kp_filtered)
+    results["ai_intents"] = ai_intents
+
+    # ── AI Readiness: People Also Ask ──
+    update("Scraping People Also Ask questions...", 0.70)
+    paa_data = fetch_people_also_ask(category, top_kw_names[:5])
+    results["paa_questions"] = paa_data
+
     # ── YouTube Suggestions (social listening) ──
-    update("Scraping YouTube search suggestions...", 0.70)
+    update("Scraping YouTube search suggestions...", 0.72)
     yt_suggestions = fetch_youtube_suggestions(category, top_kw_names[:5])
     results["youtube_suggestions"] = yt_suggestions
 
