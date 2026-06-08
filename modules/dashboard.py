@@ -155,6 +155,7 @@ def _compile_data(results: dict, insights: dict) -> dict:
         "ai_readiness": {
             "intents": results.get("ai_intents") or {},
             "paa": results.get("paa_questions") or {},
+            "content": results.get("content_readiness") or {},
         },
         "data_availability": {
             "jm_search": results.get("jm_data_available") is not False,
@@ -602,6 +603,78 @@ aiHTML+=`</tbody></table></div>`;
 // Content strategy so-what
 aiHTML+=`<div class="so-what-box">Content Strategy: Create ${clusterKeys.filter(k=>k.includes('Best')||k.includes('choose')).length>0?'buying guides and comparison articles':'FAQ pages and product education content'} to capture ${paaTotal} question-format queries. These queries signal pre-purchase research — ideal for AI chatbot training data and SEO content.</div>`;
 }
+
+// Content Readiness — AI Recommendations vs JM Catalog
+const aiCR=aiR.content||{};
+if(aiCR.available){
+const cScore=aiCR.content_score||0;const cScoreColor=cScore>=60?'var(--teal)':cScore>=35?'var(--amber)':'var(--coral)';
+const aiBrands=aiCR.ai_brands||[];const aiPrice=aiCR.ai_price_range||{};
+const aiFeats=aiCR.ai_features||[];const catActions=aiCR.catalog_actions||[];
+const contActions=aiCR.content_actions||[];const featActions=aiCR.feature_actions||[];
+const compCites=aiCR.competitor_citations||{};const contTypes=aiCR.content_types||[];
+const brandsCarried=aiBrands.filter(b=>b.on_amazon||b.on_flipkart).length;
+
+aiHTML+=`<div class="section-title" style="margin-top:40px;font-size:16px;border-bottom:2px solid var(--navy);padding-bottom:8px">Content Readiness — AI vs JioMart Catalog</div>`;
+aiHTML+=`<div style="font-size:13px;color:var(--steel);margin-bottom:16px">Gemini was asked "What are the best ${D.category} to buy online in India?" — here's how JioMart's catalog aligns with AI recommendations.</div>`;
+
+// Score + summary cards
+aiHTML+=`<div class="metric-grid cols-4">`;
+aiHTML+=`<div class="metric-card" style="border-left:4px solid ${cScoreColor}"><div class="label">Content Readiness</div><div class="value" style="color:${cScoreColor}">${cScore}%</div><div class="delta">Brand + Price + Content</div></div>`;
+aiHTML+=`<div class="metric-card"><div class="label">Brand Coverage</div><div class="value" style="font-size:24px">${brandsCarried}/${aiBrands.length}</div><div class="delta">AI-recommended brands carried</div></div>`;
+aiHTML+=`<div class="metric-card"><div class="label">Price Sweet Spot</div><div class="value" style="font-size:20px">${aiPrice.sweet_spot||'—'}</div><div class="delta">${aiPrice.in_sweet_spot?'✓ JM covers this range':'✗ JM median outside range'}</div></div>`;
+aiHTML+=`<div class="metric-card"><div class="label">JioMart Cited by AI?</div><div class="value" style="font-size:24px;color:${aiCR.jm_cited?'var(--teal)':'var(--coral)'}">${aiCR.jm_cited?'Yes':'No'}</div><div class="delta">${Object.keys(compCites).length} platforms mentioned</div></div>`;
+aiHTML+=`</div>`;
+
+// Brand alignment table
+aiHTML+=`<div class="two-col">`;
+aiHTML+=`<div><div class="section-title">AI-Recommended Brands vs Catalog</div>`;
+aiHTML+=`<table><thead><tr><th>Brand</th><th>Amazon</th><th>Flipkart</th><th>Status</th></tr></thead><tbody>`;
+aiBrands.forEach(b=>{
+  const sc=b.jm_status==='Not found'?'color:var(--coral);font-weight:600':'color:var(--teal)';
+  aiHTML+=`<tr><td style="font-weight:600;color:var(--navy)">${b.brand}</td><td>${b.on_amazon?'✓':'✗'}</td><td>${b.on_flipkart?'✓':'✗'}</td><td style="${sc}">${b.jm_status}</td></tr>`;
+});
+aiHTML+=`</tbody></table></div>`;
+
+// Competitor citations + features
+aiHTML+=`<div><div class="section-title">Platforms AI Cites</div>`;
+const platKeys=Object.keys(compCites);
+if(platKeys.length){aiHTML+=`<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px">`;platKeys.forEach(p=>{const isJM=p.toLowerCase().includes('jio');aiHTML+=`<span class="pill" style="background:${isJM?'rgba(0,166,160,0.15)':'var(--highlight)'};color:${isJM?'var(--teal)':'var(--navy)'};padding:8px 16px;font-size:13px;font-weight:600">${p}</span>`});aiHTML+=`</div>`}
+aiHTML+=`<div class="section-title">Must-Have Features (AI View)</div>`;
+if(aiFeats.length){aiHTML+=`<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px">`;aiFeats.forEach(f=>{aiHTML+=`<span class="pill" style="background:rgba(212,146,11,0.12);color:var(--amber);padding:6px 14px;font-size:12px">${f}</span>`});aiHTML+=`</div>`}
+const buyCrit=aiCR.buying_criteria||[];
+if(buyCrit.length){aiHTML+=`<div class="section-title">Buying Criteria</div><ul style="font-size:13px;color:var(--steel);padding-left:20px">`;buyCrit.forEach(c=>{aiHTML+=`<li style="margin-bottom:4px">${c}</li>`});aiHTML+=`</ul>`}
+aiHTML+=`</div></div>`;
+
+// Action cards — 3 columns
+const allCRActions=[...catActions,...contActions,...featActions];
+if(allCRActions.length){
+aiHTML+=`<div class="section-title" style="margin-top:24px">AI Citation Action Plan — ${allCRActions.length} Actions</div>`;
+
+// Catalog actions
+if(catActions.length){
+aiHTML+=`<div style="margin-bottom:16px"><div style="font-weight:700;color:var(--navy);font-size:13px;margin-bottom:8px">📦 Catalog Actions (${catActions.length})</div>`;
+catActions.forEach((a,i)=>{aiHTML+=`<div class="action-card"><div class="action-num" style="width:28px;height:28px;font-size:13px">${i+1}</div><div class="action-body"><div class="action-title">${a.action}</div><div class="action-meta">${pillHTML(a.priority,a.priority)} · ${a.type} — ${a.rationale}</div></div></div>`});
+aiHTML+=`</div>`}
+
+// Content actions
+if(contActions.length){
+aiHTML+=`<div style="margin-bottom:16px"><div style="font-weight:700;color:var(--navy);font-size:13px;margin-bottom:8px">📝 Content Actions (${contActions.length})</div>`;
+contActions.forEach((a,i)=>{aiHTML+=`<div class="action-card"><div class="action-num" style="width:28px;height:28px;font-size:13px;background:var(--teal)">${i+1}</div><div class="action-body"><div class="action-title">${a.action}</div><div class="action-meta">${pillHTML(a.priority,a.priority)} · ${a.type} — ${a.rationale}</div></div></div>`});
+aiHTML+=`</div>`}
+
+// Feature actions
+if(featActions.length){
+aiHTML+=`<div style="margin-bottom:16px"><div style="font-weight:700;color:var(--navy);font-size:13px;margin-bottom:8px">🏷️ Feature Tagging Actions (${featActions.length})</div>`;
+featActions.forEach((a,i)=>{aiHTML+=`<div class="action-card"><div class="action-num" style="width:28px;height:28px;font-size:13px;background:var(--amber)">${i+1}</div><div class="action-body"><div class="action-title">${a.action}</div><div class="action-meta">${pillHTML(a.priority,a.priority)} · ${a.type} — ${a.rationale}</div></div></div>`});
+aiHTML+=`</div>`}
+
+// So-what box
+aiHTML+=`<div class="so-what-box">Citation Playbook: ${catActions.length>0?`Onboard ${catActions.filter(a=>a.type==='Brand Onboarding').length} missing brands. `:''}${!aiPrice.in_sweet_spot&&aiPrice.sweet_spot!=='—'?`Expand pricing into the ${aiPrice.sweet_spot} sweet spot. `:''}${contActions.length>0?`Create ${contActions.length} content pieces (${contTypes.slice(0,3).join(', ')}) to become an AI-citeable source. `:''}${featActions.length>0?`Tag ${featActions.length} product attributes for AI discoverability.`:''}</div>`;
+}
+} else if(aiCR.error){
+aiHTML+=`<div class="section-title" style="margin-top:40px">Content Readiness</div><div style="background:var(--highlight);padding:20px;border-radius:8px;color:var(--steel);font-size:13px;margin-bottom:16px">Content Readiness analysis requires Gemini API. ${aiCR.error}. <a href="https://aistudio.google.com/apikey" target="_blank">Get free API key →</a></div>`;
+}
+
 aiHTML+=`</div>`;
 
 content.innerHTML = execHTML+actHTML+gHTML+bHTML+prHTML+fcHTML+aiHTML;

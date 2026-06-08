@@ -557,6 +557,225 @@ def _classify_question(q: str) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────
+# STEP 2g: AI Content Readiness — Gemini recommendations vs catalog
+# ─────────────────────────────────────────────────────────────────────
+def fetch_ai_content_readiness(category: str, results: dict) -> dict:
+    """Query Gemini for AI-recommended brands, price range, features.
+    Cross-reference against existing pipeline data to generate gap actions.
+
+    Returns dict with:
+        - ai_brands: brands AI recommends + JM carry status
+        - ai_price_range: AI-recommended price sweet spot vs JM coverage
+        - ai_features: must-have features AI highlights
+        - catalog_actions, content_actions, feature_actions
+        - content_score: overall content readiness %
+    """
+    result = {
+        "ai_brands": [],
+        "ai_price_range": {},
+        "ai_features": [],
+        "catalog_actions": [],
+        "content_actions": [],
+        "feature_actions": [],
+        "content_score": 0,
+        "competitor_citations": {},
+        "available": False,
+    }
+
+    # Check if Gemini is available
+    try:
+        from modules.insights import is_available, get_api_key
+        if not is_available():
+            result["error"] = "Gemini API not configured"
+            return result
+        from google import genai
+        api_key = get_api_key()
+        client = genai.Client(api_key=api_key)
+    except Exception as e:
+        result["error"] = str(e)[:100]
+        return result
+
+    # Build the prompt
+    prompt = f"""You are an AI shopping assistant. A customer in India asks:
+"What are the best {category} to buy online in India?"
+
+Respond ONLY with valid JSON (no markdown, no code fences) in this exact structure:
+{{
+  "recommended_brands": ["brand1", "brand2", "brand3", "brand4", "brand5", "brand6", "brand7", "brand8"],
+  "price_range": {{
+    "budget_low": 200,
+    "budget_high": 500,
+    "mid_low": 500,
+    "mid_high": 1500,
+    "premium_low": 1500,
+    "premium_high": 5000,
+    "sweet_spot_low": 400,
+    "sweet_spot_high": 1200,
+    "currency": "INR"
+  }},
+  "must_have_features": ["feature1", "feature2", "feature3", "feature4", "feature5"],
+  "buying_criteria": ["criterion1", "criterion2", "criterion3"],
+  "platforms_mentioned": ["Amazon", "Flipkart", "Myntra", "etc"],
+  "content_types_useful": ["buying guide", "comparison chart", "video review", "etc"]
+}}
+
+Be specific to {category} in India. Use real brand names popular in India.
+Return ONLY the JSON — no other text."""
+
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config={"temperature": 0.3, "max_output_tokens": 2000,
+                    "response_mime_type": "application/json"},
+        )
+
+        text = ""
+        if response.candidates:
+            for part in response.candidates[0].content.parts:
+                if hasattr(part, "text") and part.text:
+                    text += part.text
+
+        if not text.strip():
+            result["error"] = "Empty Gemini response"
+            return result
+
+        # Parse JSON
+        from modules.insights import _extract_json
+        ai_data = _extract_json(text.strip())
+        if not ai_data:
+            result["error"] = "Could not parse Gemini response"
+            return result
+
+        result["available"] = True
+
+        # ── Cross-reference: Brands ──
+        ai_brands = [b.strip() for b in ai_data.get("recommended_brands", []) if b.strip()]
+        amz_brands_upper = {b["Brand"].upper() for b in results.get("amz_brands", [])}
+        fk_brands_upper = {b["Brand"].upper() for b in results.get("fk_brands", [])}
+        all_catalog_brands = amz_brands_upper | fk_brands_upper
+
+        brand_results = []
+        for brand in ai_brands:
+            b_upper = brand.upper()
+            on_amz = any(b_upper in ab or ab in b_upper for ab in amz_brands_upper)
+            on_fk = any(b_upper in fb or fb in b_upper for fb in fk_brands_upper)
+            status = "On both" if on_amz and on_fk else "Amazon only" if on_amz else "Flipkart only" if on_fk else "Not found"
+            brand_results.append({
+                "brand": brand,
+                "on_amazon": on_amz,
+                "on_flipkart": on_fk,
+                "jm_status": status,
+            })
+        result["ai_brands"] = brand_results
+        brands_carried = sum(1 for b in brand_results if b["on_amazon"] or b["on_flipkart"])
+        brand_coverage = round(brands_carried / max(len(brand_results), 1) * 100)
+
+        # ── Cross-reference: Price range ──
+        price_info = ai_data.get("price_range", {})
+        sweet_low = price_info.get("sweet_spot_low", 0)
+        sweet_high = price_info.get("sweet_spot_high", 0)
+        amz_stats = results.get("amz_stats", {})
+        fk_stats = results.get("fk_stats", {})
+        amz_median = amz_stats.get("Median", 0)
+        fk_median = fk_stats.get("Median", 0)
+
+        # Check if JM (proxy: AMZ+FK) covers the sweet spot
+        in_sweet_spot = False
+        if sweet_low and sweet_high and (amz_median or fk_median):
+            avg_median = (amz_median + fk_median) / 2 if amz_median and fk_median else amz_median or fk_median
+            in_sweet_spot = sweet_low <= avg_median <= sweet_high
+
+        result["ai_price_range"] = {
+            "sweet_spot": f"₹{int(sweet_low)}-₹{int(sweet_high)}" if sweet_low else "—",
+            "sweet_spot_low": sweet_low,
+            "sweet_spot_high": sweet_high,
+            "amz_median": amz_median,
+            "fk_median": fk_median,
+            "in_sweet_spot": in_sweet_spot,
+            "budget": f"₹{int(price_info.get('budget_low', 0))}-₹{int(price_info.get('budget_high', 0))}",
+            "mid": f"₹{int(price_info.get('mid_low', 0))}-₹{int(price_info.get('mid_high', 0))}",
+            "premium": f"₹{int(price_info.get('premium_low', 0))}-₹{int(price_info.get('premium_high', 0))}",
+        }
+        price_score = 100 if in_sweet_spot else 50
+
+        # ── Features ──
+        result["ai_features"] = ai_data.get("must_have_features", [])
+        result["buying_criteria"] = ai_data.get("buying_criteria", [])
+
+        # ── Competitor citations ──
+        platforms = ai_data.get("platforms_mentioned", [])
+        result["competitor_citations"] = {
+            p: True for p in platforms
+        }
+        jm_mentioned = any("jio" in p.lower() for p in platforms)
+        result["jm_cited"] = jm_mentioned
+
+        # ── Content types AI finds useful ──
+        result["content_types"] = ai_data.get("content_types_useful", [])
+
+        # ── Generate Actions ──
+        # Catalog actions: brands AI recommends but JM doesn't carry
+        for b in brand_results:
+            if b["jm_status"] == "Not found":
+                result["catalog_actions"].append({
+                    "action": f"Onboard brand '{b['brand']}'",
+                    "type": "Brand Onboarding",
+                    "rationale": f"AI recommends {b['brand']} but not found in JM catalog",
+                    "priority": "High",
+                })
+
+        # Price actions
+        if not in_sweet_spot and sweet_low:
+            result["catalog_actions"].append({
+                "action": f"Add SKUs in ₹{int(sweet_low)}-₹{int(sweet_high)} range",
+                "type": "Price Coverage",
+                "rationale": f"AI sweet spot is ₹{int(sweet_low)}-₹{int(sweet_high)} but JM median is ₹{int(amz_median or fk_median)}",
+                "priority": "High",
+            })
+
+        # Content actions: from PAA questions + AI content types
+        paa_questions = results.get("paa_questions", {})
+        paa_total = paa_questions.get("total", 0)
+        content_types = ai_data.get("content_types_useful", [])
+        for ct in content_types[:4]:
+            result["content_actions"].append({
+                "action": f"Create {ct} for '{category}'",
+                "type": "Content Creation",
+                "rationale": f"AI identifies '{ct}' as key content type for purchase decisions",
+                "priority": "High" if ct.lower() in ("buying guide", "comparison chart") else "Medium",
+            })
+        if paa_total > 0:
+            result["content_actions"].append({
+                "action": f"Build FAQ page answering top {min(paa_total, 20)} questions",
+                "type": "FAQ/Schema",
+                "rationale": f"{paa_total} PAA questions found — structured FAQ enables AI citation",
+                "priority": "High",
+            })
+
+        # Feature actions
+        for feat in result["ai_features"][:5]:
+            result["feature_actions"].append({
+                "action": f"Add '{feat}' as filterable attribute",
+                "type": "Attribute Tagging",
+                "rationale": f"AI highlights '{feat}' as must-have — needs catalog tagging for discoverability",
+                "priority": "Medium",
+            })
+
+        # Content readiness score
+        # brand_coverage (40%) + price_score (30%) + content exists proxy (30%)
+        content_proxy = min(paa_total * 5, 100)  # more questions = more content opportunity
+        result["content_score"] = round(
+            brand_coverage * 0.4 + price_score * 0.3 + content_proxy * 0.3
+        )
+
+    except Exception as e:
+        result["error"] = str(e)[:200]
+
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────
 # STEP 3: Run full analysis
 # ─────────────────────────────────────────────────────────────────────
 def run_analysis(
@@ -830,8 +1049,13 @@ def run_analysis(
     paa_data = fetch_people_also_ask(category, top_kw_names[:5])
     results["paa_questions"] = paa_data
 
+    # ── AI Content Readiness (Gemini cross-reference) ──
+    update("Checking AI content readiness via Gemini...", 0.73)
+    content_readiness = fetch_ai_content_readiness(category, results)
+    results["content_readiness"] = content_readiness
+
     # ── YouTube Suggestions (social listening) ──
-    update("Scraping YouTube search suggestions...", 0.72)
+    update("Scraping YouTube search suggestions...", 0.75)
     yt_suggestions = fetch_youtube_suggestions(category, top_kw_names[:5])
     results["youtube_suggestions"] = yt_suggestions
 
