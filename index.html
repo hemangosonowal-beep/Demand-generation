@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>JioMart Demand Analysis</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1e222c;
+    --border: #2a2f3a;
+    --text: #e6e8ec;
+    --text-dim: #9aa1ac;
+    --accent: #4f8cff;
+    --accent-2: #ff6b4f;
+    --navy: #051C2C;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; }
+  #app { display: grid; grid-template-columns: 340px 1fr; height: 100vh; }
+  @media (max-width: 1000px) { #app { grid-template-columns: 1fr; height: auto; } #resultWrap { height: 640px; } }
+
+  #controls { background: var(--panel); border-right: 1px solid var(--border); padding: 24px; overflow-y: auto; }
+  #controls h1 { font-size: 17px; margin: 0 0 4px; }
+  #controls .sub { color: var(--text-dim); font-size: 12px; margin-bottom: 24px; line-height: 1.5; }
+  label { display: block; font-size: 12px; color: var(--text-dim); margin: 16px 0 6px; text-transform: uppercase; letter-spacing: 0.04em; }
+  input, select { width: 100%; padding: 9px 10px; background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text); font-size: 13px; }
+  input:focus, select:focus { outline: none; border-color: var(--accent); }
+  button#generate { width: 100%; margin-top: 22px; padding: 12px; background: var(--accent); color: white;
+    border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; }
+  button#generate:disabled { opacity: 0.5; cursor: default; }
+  button#generate:hover:not(:disabled) { background: #3d78ea; }
+  #status { font-size: 12px; color: var(--text-dim); margin-top: 12px; min-height: 16px; line-height: 1.5; }
+  #status.error { color: var(--accent-2); white-space: pre-wrap; }
+  #matched { font-size: 11px; color: var(--text-dim); margin-top: 8px; line-height: 1.5; }
+
+  #statsGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 20px; }
+  .stat-card { background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; }
+  .stat-card .v { font-size: 18px; font-weight: 700; color: #fff; }
+  .stat-card .l { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em; margin-top: 2px; }
+
+  #downloadBtn { width: 100%; margin-top: 16px; padding: 10px; background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; font-size: 13px; cursor: pointer; display: none; }
+  #downloadBtn:hover { border-color: var(--accent); }
+
+  #configNote { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-dim); line-height: 1.5; }
+  #configNote code { background: var(--panel-2); padding: 1px 5px; border-radius: 3px; }
+
+  #resultWrap { position: relative; background: #fff; }
+  #placeholder { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: var(--text-dim); background: var(--bg); font-size: 13px; text-align: center; padding: 40px; }
+  #dashFrame { width: 100%; height: 100%; border: none; display: none; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <div id="controls">
+    <h1>📊 JioMart Demand Analysis</h1>
+    <div class="sub">Select a category → generate a McKinsey-style demand dashboard. Runs on AWS Lambda, hosted on GitHub Pages.</div>
+
+    <label for="level">Category level</label>
+    <select id="level">
+      <option value="AOP L2" selected>AOP L2</option>
+      <option value="L2">L2</option>
+      <option value="L3">L3</option>
+      <option value="L4">L4</option>
+      <option value="Custom">Custom (free text)</option>
+    </select>
+
+    <label for="categorySelect" id="categorySelectLabel">Select AOP L2</label>
+    <select id="categorySelect"></select>
+
+    <input id="categoryInput" type="text" placeholder="e.g. Pressure Cookers, Helmets" style="display:none; margin-top: 8px;" />
+
+    <button id="generate">🚀 Generate Analysis</button>
+    <div id="status"></div>
+    <div id="matched"></div>
+
+    <div id="statsGrid" style="display:none;"></div>
+    <button id="downloadBtn">⬇️ Download dashboard HTML</button>
+
+    <div id="configNote">
+      Backend: <code id="apiUrlDisplay">not configured</code><br/>
+      Edit <code>API_URL</code> at the top of the script in this file once your
+      Lambda Function URL is live.
+    </div>
+  </div>
+
+  <div id="resultWrap">
+    <div id="placeholder">Choose a category and click Generate to see the dashboard here.</div>
+    <iframe id="dashFrame"></iframe>
+  </div>
+
+</div>
+
+<script>
+// ── Configure this after deploying the Lambda (see DEPLOYMENT.md) ──
+const API_URL = "https://c2e6lieygzdljxsas3ejdpmucu0kxpqd.lambda-url.ap-south-1.on.aws/";
+
+document.getElementById('apiUrlDisplay').textContent = API_URL.includes('REPLACE-ME')
+  ? 'not configured — edit index.html'
+  : API_URL;
+
+let CATEGORIES = {};
+
+async function loadCategories() {
+  try {
+    const resp = await fetch('categories.json', { cache: 'no-store' });
+    CATEGORIES = await resp.json();
+  } catch (e) {
+    CATEGORIES = {};
+  }
+  populateCategorySelect();
+}
+
+function populateCategorySelect() {
+  const level = document.getElementById('level').value;
+  const select = document.getElementById('categorySelect');
+  const input = document.getElementById('categoryInput');
+  const label = document.getElementById('categorySelectLabel');
+
+  if (level === 'Custom') {
+    select.style.display = 'none';
+    input.style.display = 'block';
+    label.textContent = 'Category name';
+    return;
+  }
+
+  select.style.display = 'block';
+  input.style.display = 'none';
+  label.textContent = 'Select ' + level;
+
+  const options = CATEGORIES[level] || [];
+  select.innerHTML = '<option value="">— choose —</option>' +
+    options.map(o => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('');
+
+  if (!options.length) {
+    select.innerHTML = `<option value="">No ${level} categories found (check categories.json)</option>`;
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+document.getElementById('level').addEventListener('change', populateCategorySelect);
+
+function getSelectedCategory() {
+  const level = document.getElementById('level').value;
+  if (level === 'Custom') {
+    return document.getElementById('categoryInput').value.trim();
+  }
+  return document.getElementById('categorySelect').value.trim();
+}
+
+document.getElementById('generate').addEventListener('click', async () => {
+  const category = getSelectedCategory();
+  const btn = document.getElementById('generate');
+  const statusEl = document.getElementById('status');
+  const matchedEl = document.getElementById('matched');
+  const placeholder = document.getElementById('placeholder');
+  const frame = document.getElementById('dashFrame');
+  const statsGrid = document.getElementById('statsGrid');
+  const downloadBtn = document.getElementById('downloadBtn');
+
+  statusEl.classList.remove('error');
+  matchedEl.textContent = '';
+
+  if (!category) {
+    statusEl.classList.add('error');
+    statusEl.textContent = 'Choose a category first.';
+    return;
+  }
+  if (API_URL.includes('REPLACE-ME')) {
+    statusEl.classList.add('error');
+    statusEl.textContent = 'API_URL is not configured yet — edit it at the top of index.html.';
+    return;
+  }
+
+  btn.disabled = true;
+  statsGrid.style.display = 'none';
+  downloadBtn.style.display = 'none';
+  statusEl.textContent = 'Generating… this calls Google Trends, YouTube & PAA signals plus Gemini, so it can take 10–30s.';
+
+  const startedAt = Date.now();
+  try {
+    const resp = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ category })
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+
+    const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
+    statusEl.textContent = `Done in ${seconds}s.`;
+
+    if (data.matched_keywords && data.matched_keywords.length) {
+      matchedEl.textContent = `Matched ${data.matched_keywords.length}+ hierarchy keywords: ${data.matched_keywords.join(', ')}`;
+    }
+
+    renderStats(data.stats || {});
+    frame.srcdoc = data.html;
+    frame.style.display = 'block';
+    placeholder.style.display = 'none';
+
+    downloadBtn.style.display = 'block';
+    downloadBtn.onclick = () => downloadHtml(data.html, category);
+
+  } catch (err) {
+    statusEl.classList.add('error');
+    statusEl.textContent = `Request failed: ${err.message}`;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+function renderStats(stats) {
+  const grid = document.getElementById('statsGrid');
+  const items = [
+    ['JM Keywords', stats.jm_keywords],
+    ['Google Keywords', stats.kp_keywords],
+    ['Amazon Products', stats.amz_count],
+    ['Flipkart Products', stats.fk_count],
+    ['Coverage', stats.coverage_pct != null ? stats.coverage_pct + '%' : '—'],
+    ['Actions', stats.actions],
+  ];
+  grid.innerHTML = items.map(([l, v]) => `
+    <div class="stat-card"><div class="v">${v ?? '—'}</div><div class="l">${l}</div></div>
+  `).join('');
+  grid.style.display = 'grid';
+}
+
+function downloadHtml(html, category) {
+  const blob = new Blob([html], { type: 'text/html' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `Demand_Analysis_${category.replace(/\s+/g, '_')}.html`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+loadCategories();
+</script>
+</body>
+</html>
